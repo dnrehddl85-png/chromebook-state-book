@@ -232,10 +232,6 @@ function renderCurrentSheet() {
   gradeData.classes.forEach((cls, index) => {
     const tr = document.createElement('tr');
     
-    const gradeSelectHtml = `
-      <span style="font-weight: 600; color: var(--text-secondary);">${cls.grade}학년</span>
-    `;
-    
     const cabinetSelectHtml = `
       <select class="grid-input" data-field="chargingCabinet" data-index="${index}" style="text-align: center; color: ${getCabinetColor(cls.chargingCabinet)}; font-weight: 500;">
         <option value="normal" ${cls.chargingCabinet === 'normal' ? 'selected' : ''} style="color: var(--success-color);">이상없음</option>
@@ -245,7 +241,6 @@ function renderCurrentSheet() {
     `;
 
     tr.innerHTML = `
-      <td style="text-align: center; background-color: var(--bg-tertiary);">${gradeSelectHtml}</td>
       <td>
         <input type="text" class="grid-input" data-field="deptClass" data-index="${index}" value="${escapeHtml(cls.deptClass)}" style="font-weight: 500;">
       </td>
