@@ -2,11 +2,11 @@
 
 // 1. Initial configuration and core constants
 const GRADES = [1, 2];
-const DB_KEY = 'chromebook_summary_ledger_v2';
+const DB_KEY = 'chromebook_summary_ledger_v3'; // 데이터 구조 개편에 따른 캐시 충돌 방지용 키 업데이트
 
 // Departments configuration for initial setup
-const DEPT_1 = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과'];
-const DEPT_2 = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과', '전기제어과', '정밀기계과'];
+const DEPT_1 = ['소재', '전동', '로봇', '데이터소프트'];
+const DEPT_2 = ['화공', '스마트패션', '전기정보', '스마트융합', '전자과', '스마트소프트'];
 
 // Global App State
 let db = null;
@@ -144,6 +144,7 @@ function generateInitialClasses(grade) {
   const classesList = [];
   
   if (grade === 1) {
+    // 1학년: 4개 학과당 3개 학급 (소재, 전동, 로봇, 데이터소프트 순)
     DEPT_1.forEach(dept => {
       for (let ban = 1; ban <= 3; ban++) {
         classesList.push({
@@ -159,8 +160,9 @@ function generateInitialClasses(grade) {
       }
     });
   } else if (grade === 2) {
-    DEPT_2.forEach((dept, idx) => {
-      const bansCount = (idx === DEPT_2.length - 1) ? 3 : 2;
+    // 2학년: 스마트융합만 3개 학급, 나머지는 2개 학급
+    DEPT_2.forEach(dept => {
+      const bansCount = (dept === '스마트융합') ? 3 : 2;
       for (let ban = 1; ban <= bansCount; ban++) {
         classesList.push({
           grade: 2,
