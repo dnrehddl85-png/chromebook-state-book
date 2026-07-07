@@ -5,6 +5,20 @@ const GRADES = [1, 2];
 const DB_KEY = 'chromebook_summary_ledger_v6'; 
 const FIREBASE_CONFIG_KEY = 'chromebook_firebase_config';
 
+// 💡 [실시간 자동 연동 설정 팁]
+// 다른 담임 선생님들이 링크만 누르면 설정 없이 자동으로 동일 서버에 모이게 하려면,
+// 아래 null 자리에 발급받으신 Firebase 설정 객체(apiKey 등)를 직접 입력해 주세요.
+// 예: const DEFAULT_FIREBASE_CONFIG = { apiKey: "AIza...", databaseURL: "https://..." };
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAZU_aURAHI_tDM8MVK1w79cSgjD0kdD2U",
+  authDomain: "gen-lang-client-0329797746.firebaseapp.com",
+  databaseURL: "https://gen-lang-client-0329797746-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "gen-lang-client-0329797746",
+  storageBucket: "gen-lang-client-0329797746.firebasestorage.app",
+  messagingSenderId: "9208747094",
+  appId: "1:9208747094:web:483f773220f80210ee57f7"
+};
+
 // Departments configuration for initial setup
 const DEPT_1 = ['소재', '전동', '로보', '데이터소프트'];
 const DEPT_2 = ['화공', '스마트패션', '전기정보', '스마트융합', '전자과', '스마트소프트'];
@@ -100,6 +114,9 @@ function loadData() {
     } catch (e) {
       console.error("저장된 Firebase 설정 로드 실패", e);
     }
+  } else if (DEFAULT_FIREBASE_CONFIG) {
+    // 로컬 스토리지에 설정이 없어도 기본 코드가 심어져 있다면 자동 연동
+    connectToFirebase(DEFAULT_FIREBASE_CONFIG);
   }
 }
 
