@@ -2,7 +2,7 @@
 
 // 1. Initial configuration and core constants
 const GRADES = [1, 2];
-const DB_KEY = 'chromebook_summary_ledger_v5'; // 데이터 구조 및 서명 메커니즘 개편에 따른 캐시 충돌 방지용 키 업데이트
+const DB_KEY = 'chromebook_summary_ledger_v6'; // 데이터 구조 및 서명 메커니즘 개편에 따른 캐시 충돌 방지용 키 업데이트
 
 // Departments configuration for initial setup
 const DEPT_1 = ['소재', '전동', '로보', '데이터소프트'];
@@ -144,7 +144,7 @@ function generateInitialClasses(grade) {
   const classesList = [];
   
   if (grade === 1) {
-    // 1학년: 4개 학과당 3개 학급 (소재, 전동, 로봇, 데이터소프트 순)
+    // 1학년: 4개 학과당 3개 학급 (소재, 전동, 로보, 데이터소프트 순)
     DEPT_1.forEach(dept => {
       for (let ban = 1; ban <= 3; ban++) {
         classesList.push({
@@ -276,7 +276,6 @@ function renderCurrentSheet() {
   // Render Bottom final sign-offs
   // Department Head
   document.getElementById('dept-head-name').value = gradeData.deptHeadName || '';
-  document.getElementById('dept-head-sig-style').value = gradeData.deptHeadSigStyle || '1';
   renderDeptHeadSignatureDisplay(gradeData);
   
   // Vice Principal
@@ -502,14 +501,6 @@ function initEventListeners() {
     
     const classRow = db[currentDate][currentGrade].classes[index];
     
-    if (field === 'sigStyle') {
-      classRow.sigStyle = el.value;
-      classRow.signType = 'text'; // override canvas
-      saveData();
-      renderCurrentSheet();
-      return;
-    }
-    
     if (field === 'chargingCabinet' || field === 'grade') {
       const val = field === 'grade' ? parseInt(el.value) : el.value;
       classRow[field] = val;
@@ -518,26 +509,26 @@ function initEventListeners() {
     }
   });
 
-  // Handle buttons and signature display click inside table rows
+  // Handle buttons and signature display click inside table rows (Strict Delegation)
   tableBody.addEventListener('click', (e) => {
+    // 1. Reset button check
     const resetBtn = e.target.closest('.row-sig-reset');
     if (resetBtn) {
+      e.preventDefault();
       e.stopPropagation();
       const index = parseInt(resetBtn.dataset.index);
       clearRowSignature(index);
       return;
     }
     
+    // 2. Draw signature check (Draw button or signature display click)
     const drawBtn = e.target.closest('.btn-sig-draw');
-    if (drawBtn) {
-      const index = parseInt(drawBtn.dataset.index);
-      openRowSignatureModal(index);
-      return;
-    }
-    
     const sigDisplay = e.target.closest('.row-sig-display');
-    if (sigDisplay && !e.target.closest('.row-sig-reset')) {
-      const index = parseInt(sigDisplay.dataset.index);
+    
+    if (drawBtn || sigDisplay) {
+      e.preventDefault();
+      e.stopPropagation();
+      const index = parseInt((drawBtn || sigDisplay).dataset.index);
       openRowSignatureModal(index);
     }
   });
@@ -547,23 +538,12 @@ function initEventListeners() {
     const val = e.target.value;
     const gradeData = db[currentDate][currentGrade];
     gradeData.deptHeadName = val;
-    // 부장 이름이 지워지면 서명도 함께 삭제
     if (!val) {
       gradeData.deptHeadSign = '';
       gradeData.deptHeadSignType = 'text';
     }
     saveData();
     renderDeptHeadSignatureDisplay(gradeData);
-  });
-
-  // Dept Head Style Dropdown change
-  document.getElementById('dept-head-sig-style').addEventListener('change', (e) => {
-    const val = e.target.value;
-    const gradeData = db[currentDate][currentGrade];
-    gradeData.deptHeadSigStyle = val;
-    gradeData.deptHeadSignType = 'text';
-    saveData();
-    renderCurrentSheet();
   });
 
   // Dept Head Sign Canvas open
@@ -659,10 +639,6 @@ function initEventListeners() {
 function initCanvas() {
   canvas = document.getElementById('signature-canvas');
   ctx = canvas.getContext('2d');
-  
-  ctx.lineWidth = 3;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
   
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
@@ -760,8 +736,14 @@ function openVicePrincipalSignatureModal() {
 
 function resizeCanvas() {
   const container = canvas.parentElement;
-  canvas.width = container.clientWidth;
-  canvas.height = container.clientHeight;
+  canvas.width = container.clientWidth || 460;
+  canvas.height = container.clientHeight || 200;
+  
+  // Re-apply drawing context options since resizing clears canvas context styles
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
   clearCanvas();
 }
 
@@ -793,7 +775,6 @@ function draw(e) {
   lastY = currentY;
 }
 
-// Touchend maps to stop drawing
 function stopDrawing() {
   isDrawing = false;
 }
