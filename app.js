@@ -1,22 +1,17 @@
-/* app.js - Chromebook State Book Application Logic */
+/* app.js - Chromebook Summary Ledger for Yeongnam Technical High School */
 
 // 1. Initial configuration and core constants
-const DEPARTMENTS = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과'];
-const CLASSES = [1, 2, 3];
-const STUDENTS_PER_CLASS = 18;
+const GRADES = [1, 2];
+const DB_KEY = 'chromebook_summary_ledger_v1';
 
-// Depatment code maps for serial number and Chromebook ID templates
-const DEPT_CODES = {
-  '전동제어과': 'EC',  // Electric Control
-  'DSW과': 'DSW',      // Digital Software
-  '로보틱스과': 'ROB',  // Robotics
-  '소재에너지과': 'ME'  // Materials & Energy
-};
+// Departments configuration for initial setup
+const DEPT_1 = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과'];
+const DEPT_2 = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과', '전기제어과', '정밀기계과'];
 
 // Global App State
 let db = null;
-let currentDept = DEPARTMENTS[0];
-let currentClass = CLASSES[0];
+let currentGrade = 1; // 1 or 2
+let currentDate = ''; // Format: YYYY-MM-DD
 
 // Canvas Drawing State
 let canvas = null;
@@ -24,18 +19,20 @@ let ctx = null;
 let isDrawing = false;
 let lastX = 0;
 let lastY = 0;
-let drawTarget = null; // 'homeroom' or 'deptHead'
+let drawTargetRole = null; // 'homeroom' or 'deptHead'
+let drawTargetRowIndex = null; // if role is 'homeroom', which row index
 let strokeColor = '#1e3a8a'; // Deep blue ink default
 
 // 2. Initialize application
 document.addEventListener('DOMContentLoaded', () => {
-  initLucide();
+  initDate();
   loadData();
-  renderTabs();
+  renderGradeTabs();
   renderStats();
   renderCurrentSheet();
   initEventListeners();
   initCanvas();
+  initLucide();
 });
 
 function initLucide() {
@@ -44,187 +41,327 @@ function initLucide() {
   }
 }
 
+function initDate() {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  currentDate = `${yyyy}-${mm}-${dd}`;
+  
+  const dateInput = document.getElementById('sheet-date-input');
+  if (dateInput) {
+    dateInput.value = currentDate;
+  }
+  updatePrintDateDisplay();
+}
+
+function updatePrintDateDisplay() {
+  const printDisplay = document.getElementById('print-date-display');
+  if (printDisplay) {
+    const parts = currentDate.split('-');
+    if (parts.length === 3) {
+      printDisplay.innerText = `검수 일자: ${parts[0]}년 ${parts[1]}월 ${parts[2]}일`;
+    } else {
+      printDisplay.innerText = `검수 일자: ${currentDate}`;
+    }
+  }
+}
+
 // 3. Data Loading & Generation
 function loadData() {
-  const savedData = localStorage.getItem('chromebook_state_book');
+  const savedData = localStorage.getItem(DB_KEY);
   if (savedData) {
     try {
       db = JSON.parse(savedData);
-      // Migrate or patch if some departments are missing
-      DEPARTMENTS.forEach(dept => {
-        if (!db[dept]) db[dept] = {};
-        CLASSES.forEach(cls => {
-          if (!db[dept][cls]) {
-            db[dept][cls] = generateInitialClassData(dept, cls);
-          }
-        });
-      });
     } catch (e) {
-      console.error("로컬 스토리지 데이터 파싱 실패. 초기화합니다.", e);
-      initializeDefaultDatabase();
+      console.error("데이터 로딩 실패. 새로 생성합니다.", e);
+      db = {};
     }
   } else {
-    initializeDefaultDatabase();
+    db = {};
   }
+  
+  ensureDateDataExists(currentDate);
 }
 
-function initializeDefaultDatabase() {
-  db = {};
-  DEPARTMENTS.forEach(dept => {
-    db[dept] = {};
-    CLASSES.forEach(cls => {
-      db[dept][cls] = generateInitialClassData(dept, cls);
-    });
+function getLatestAvailableDateBefore(targetDate) {
+  const dates = Object.keys(db).filter(d => d < targetDate).sort();
+  if (dates.length > 0) {
+    return dates[dates.length - 1];
+  }
+  return null;
+}
+
+function ensureDateDataExists(dateStr) {
+  if (db[dateStr]) return;
+  
+  db[dateStr] = {};
+  const prevDate = getLatestAvailableDateBefore(dateStr);
+  
+  GRADES.forEach(grade => {
+    if (prevDate && db[prevDate] && db[prevDate][grade]) {
+      // Clone previous day data (names, quantities, statuses) but clear signatures
+      const prevGradeData = db[prevDate][grade];
+      db[dateStr][grade] = {
+        classes: prevGradeData.classes.map(cls => ({
+          grade: cls.grade,
+          deptClass: cls.deptClass,
+          teacherName: cls.teacherName,
+          quantity: cls.quantity,
+          chargingCabinet: cls.chargingCabinet || 'normal',
+          signature: '',
+          sigStyle: cls.sigStyle || '1',
+          signType: 'text'
+        })),
+        deptHeadName: prevGradeData.deptHeadName || '',
+        deptHeadSign: '',
+        deptHeadSigStyle: prevGradeData.deptHeadSigStyle || '1',
+        deptHeadSignType: 'text'
+      };
+    } else {
+      // Generate default data
+      db[dateStr][grade] = {
+        classes: generateInitialClasses(grade),
+        deptHeadName: '',
+        deptHeadSign: '',
+        deptHeadSigStyle: '1',
+        deptHeadSignType: 'text'
+      };
+    }
   });
+  
   saveData();
 }
 
-function generateInitialClassData(dept, cls) {
-  const code = DEPT_CODES[dept] || 'CB';
-  const students = [];
+function generateInitialClasses(grade) {
+  const classesList = [];
   
-  for (let i = 1; i <= STUDENTS_PER_CLASS; i++) {
-    const numStr = String(i).padStart(2, '0');
-    students.push({
-      id: i,
-      studentName: `학생${i}`,
-      chromebookId: `CB-${code}-1-${cls}-${numStr}`,
-      serialNumber: `SN-${code}-2026-${cls}-${numStr}`,
-      remarks: ''
+  if (grade === 1) {
+    // 1st Grade: 4 departments, 12 classes (each dept has 3 classes: 1, 2, 3 ban)
+    DEPT_1.forEach(dept => {
+      for (let ban = 1; ban <= 3; ban++) {
+        classesList.push({
+          grade: 1,
+          deptClass: `${dept} ${ban}반`,
+          teacherName: '',
+          quantity: 18,
+          chargingCabinet: 'normal', // normal, warning, danger
+          signature: '',
+          sigStyle: '1',
+          signType: 'text'
+        });
+      }
+    });
+  } else if (grade === 2) {
+    // 2nd Grade: 6 departments, 13 classes. 
+    // We map depts: 5 depts have 2 classes, 1 dept has 3 classes = 13 classes total
+    DEPT_2.forEach((dept, idx) => {
+      const bansCount = (idx === DEPT_2.length - 1) ? 3 : 2;
+      for (let ban = 1; ban <= bansCount; ban++) {
+        classesList.push({
+          grade: 2,
+          deptClass: `${dept} ${ban}반`,
+          teacherName: '',
+          quantity: 18,
+          chargingCabinet: 'normal',
+          signature: '',
+          sigStyle: '1',
+          signType: 'text'
+        });
+      }
     });
   }
   
-  return {
-    students: students,
-    homeroomTeacher: '',
-    homeroomSign: '',      // Base64 image data or empty
-    homeroomSigStyle: '1', // 1, 2, 3, 4 or 'seal'
-    homeroomSignType: 'text', // 'text' or 'draw'
-    departmentHead: '',
-    departmentSign: '',
-    deptHeadSigStyle: '1',
-    deptHeadSignType: 'text'
-  };
+  return classesList;
 }
 
 function saveData() {
-  localStorage.setItem('chromebook_state_book', JSON.stringify(db));
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
   renderStats();
 }
 
 // 4. UI Rendering Functions
-function renderTabs() {
-  const deptTabsContainer = document.getElementById('dept-tabs');
-  const classTabsContainer = document.getElementById('class-tabs');
-  
-  // Render Department Tabs
-  deptTabsContainer.innerHTML = DEPARTMENTS.map(dept => `
-    <button class="tab-btn ${dept === currentDept ? 'active' : ''}" data-dept="${dept}">
-      ${dept}
-    </button>
-  `).join('');
-  
-  // Render Class Tabs
-  classTabsContainer.innerHTML = CLASSES.map(cls => `
-    <button class="sub-tab-btn ${cls === currentClass ? 'active' : ''}" data-class="${cls}">
-      ${cls}반
-    </button>
-  `).join('');
+function renderGradeTabs() {
+  const tabsContainer = document.getElementById('grade-tabs');
+  tabsContainer.innerHTML = `
+    <button class="tab-btn ${currentGrade === 1 ? 'active' : ''}" data-grade="1">1학년 대장 (12학급)</button>
+    <button class="tab-btn ${currentGrade === 2 ? 'active' : ''}" data-grade="2">2학년 대장 (13학급)</button>
+  `;
 }
 
 function renderStats() {
-  // Count filled signatures
-  let completedSigns = 0;
-  let totalPossible = DEPARTMENTS.length * CLASSES.length * 2; // homeroom + deptHead for each class = 24
+  let totalClasses = 0;
+  let signedCount = 0;
+  let cabinetErrors = 0;
   
-  DEPARTMENTS.forEach(dept => {
-    CLASSES.forEach(cls => {
-      const data = db[dept][cls];
-      if (data.homeroomTeacher && data.homeroomSign) completedSigns++;
-      if (data.departmentHead && data.departmentSign) completedSigns++;
+  if (db[currentDate]) {
+    GRADES.forEach(grade => {
+      const gradeData = db[currentDate][grade];
+      if (gradeData) {
+        totalClasses += gradeData.classes.length;
+        gradeData.classes.forEach(cls => {
+          if (cls.signature && cls.teacherName) {
+            signedCount++;
+          }
+          if (cls.chargingCabinet === 'warning' || cls.chargingCabinet === 'danger') {
+            cabinetErrors++;
+          }
+        });
+      }
     });
-  });
+  }
   
-  document.getElementById('stat-signatures').innerText = `${completedSigns} / ${totalPossible}`;
+  document.getElementById('stat-total-classes').innerText = `${totalClasses}개 학급`;
+  document.getElementById('stat-signed-count').innerText = `${signedCount} / ${totalClasses} 완료`;
+  document.getElementById('stat-cabinet-errors').innerText = `${cabinetErrors}개소`;
 }
 
 function renderCurrentSheet() {
-  const classData = db[currentDept][currentClass];
+  const gradeData = db[currentDate][currentGrade];
   
   // Set titles
-  document.getElementById('current-sheet-title').innerText = `${currentDept} 1학년 ${currentClass}반 크롬북 관리 대장`;
-  document.getElementById('current-sheet-subtitle').innerText = `정원: ${classData.students.length}명 | 크롬북 배정 및 상태 점검표`;
+  document.getElementById('current-sheet-title').innerText = `${currentGrade}학년 크롬북 관리 대장`;
+  document.getElementById('current-sheet-subtitle').innerText = `영남공업고등학교 | 학급 수: ${gradeData.classes.length}개 반`;
   
-  // Render Student Table Rows
-  const tbody = document.getElementById('student-table-body');
+  // Render Summary Table Rows
+  const tbody = document.getElementById('class-table-body');
   tbody.innerHTML = '';
   
-  classData.students.forEach((student, index) => {
+  gradeData.classes.forEach((cls, index) => {
     const tr = document.createElement('tr');
+    
+    // Dropdown to select Grade in the row
+    const gradeSelectHtml = `
+      <select class="grid-input" data-field="grade" data-index="${index}" style="text-align: center; font-weight:600;">
+        <option value="1" ${cls.grade === 1 ? 'selected' : ''}>1학년</option>
+        <option value="2" ${cls.grade === 2 ? 'selected' : ''}>2학년</option>
+      </select>
+    `;
+    
+    // Dropdown to select Charging cabinet status
+    const cabinetSelectHtml = `
+      <select class="grid-input" data-field="chargingCabinet" data-index="${index}" style="text-align: center; color: ${getCabinetColor(cls.chargingCabinet)}; font-weight: 500;">
+        <option value="normal" ${cls.chargingCabinet === 'normal' ? 'selected' : ''} style="color: var(--success-color);">이상 없음</option>
+        <option value="warning" ${cls.chargingCabinet === 'warning' ? 'selected' : ''} style="color: #f59e0b;">점검 필요</option>
+        <option value="danger" ${cls.chargingCabinet === 'danger' ? 'selected' : ''} style="color: var(--danger-color);">이상 있음</option>
+      </select>
+    `;
+
+    // Row signature HTML cell
+    const sigCellHtml = getRowSignatureCellHtml(cls, index);
+    
     tr.innerHTML = `
-      <td style="text-align: center; font-weight: 600; background-color: var(--bg-tertiary);">${student.id}</td>
+      <td style="text-align: center; background-color: var(--bg-tertiary);">${gradeSelectHtml}</td>
       <td>
-        <input type="text" class="grid-input font-mono" data-field="chromebookId" data-index="${index}" value="${escapeHtml(student.chromebookId)}">
+        <input type="text" class="grid-input" data-field="deptClass" data-index="${index}" value="${escapeHtml(cls.deptClass)}" style="font-weight: 500;">
       </td>
       <td>
-        <input type="text" class="grid-input" data-field="studentName" data-index="${index}" value="${escapeHtml(student.studentName)}">
+        <input type="text" class="grid-input row-teacher-name" data-field="teacherName" data-index="${index}" value="${escapeHtml(cls.teacherName)}" placeholder="담임이름 입력">
       </td>
       <td>
-        <input type="text" class="grid-input font-mono" data-field="serialNumber" data-index="${index}" value="${escapeHtml(student.serialNumber)}">
+        <input type="number" class="grid-input" data-field="quantity" data-index="${index}" value="${cls.quantity}" style="text-align: center;">
       </td>
       <td>
-        <input type="text" class="grid-input" data-field="remarks" data-index="${index}" value="${escapeHtml(student.remarks)}" placeholder="상태 양호">
+        ${cabinetSelectHtml}
+      </td>
+      <td class="sig-cell">
+        ${sigCellHtml}
       </td>
     `;
+    
     tbody.appendChild(tr);
   });
   
-  // Render Teacher Signatures
-  // Homeroom
-  document.getElementById('homeroom-teacher-name').value = classData.homeroomTeacher || '';
-  document.getElementById('homeroom-sig-style').value = classData.homeroomSigStyle || '1';
-  renderSignatureDisplay('homeroom', classData);
-  
-  // Dept Head
-  document.getElementById('dept-head-name').value = classData.departmentHead || '';
-  document.getElementById('dept-head-sig-style').value = classData.deptHeadSigStyle || '1';
-  renderSignatureDisplay('deptHead', classData);
+  // Render Department Head sign-off at bottom
+  document.getElementById('dept-head-name').value = gradeData.deptHeadName || '';
+  document.getElementById('dept-head-sig-style').value = gradeData.deptHeadSigStyle || '1';
+  renderDeptHeadSignatureDisplay(gradeData);
 }
 
-function renderSignatureDisplay(role, classData) {
-  const displayArea = document.getElementById(`${role === 'homeroom' ? 'homeroom' : 'dept'}-signature-display`);
-  const name = role === 'homeroom' ? classData.homeroomTeacher : classData.departmentHead;
-  const sign = role === 'homeroom' ? classData.homeroomSign : classData.departmentSign;
-  const style = role === 'homeroom' ? classData.homeroomSigStyle : classData.deptHeadSigStyle;
-  const type = role === 'homeroom' ? classData.homeroomSignType : classData.deptHeadSignType;
+function getCabinetColor(status) {
+  if (status === 'warning') return '#d97706';
+  if (status === 'danger') return 'var(--danger-color)';
+  return 'var(--success-color)';
+}
+
+function getRowSignatureCellHtml(cls, index) {
+  const name = cls.teacherName;
+  const sign = cls.signature;
+  const style = cls.sigStyle;
+  const type = cls.signType;
+  
+  let sigContentHtml = '';
   
   if (!name && !sign) {
-    // Show placeholder
+    sigContentHtml = `
+      <div class="signature-placeholder" style="font-size:0.75rem;">
+        <span>이름을 기입해 주세요</span>
+      </div>
+    `;
+  } else if (type === 'draw' && sign) {
+    sigContentHtml = `<img src="${sign}" class="signature-image">`;
+  } else if (name) {
+    if (style === 'seal') {
+      let sealText = name;
+      if (name.length === 3) sealText = `${name[0]}<br>${name[1]}${name[2]}`;
+      else if (name.length === 2) sealText = `${name[0]}<br>${name[1]}인`;
+      else if (name.length > 3) sealText = name.substring(0, 4);
+      sigContentHtml = `<div class="sig-font-seal">${sealText}</div>`;
+    } else {
+      sigContentHtml = `<div class="sig-text sig-font-${style}">${name}</div>`;
+    }
+  }
+  
+  return `
+    <div class="row-sig-container">
+      <div class="row-sig-display" data-index="${index}" title="클릭하여 직접 서명하기">
+        ${sigContentHtml}
+        ${(name || sign) ? `<button class="signature-reset-btn row-sig-reset" data-index="${index}" title="서명 지우기">&times;</button>` : ''}
+      </div>
+      <div class="row-sig-controls no-print">
+        <select class="table-style-select" data-field="sigStyle" data-index="${index}">
+          <option value="1" ${style === '1' ? 'selected' : ''}>펜</option>
+          <option value="2" ${style === '2' ? 'selected' : ''}>붓</option>
+          <option value="3" ${style === '3' ? 'selected' : ''}>독도</option>
+          <option value="seal" ${style === 'seal' ? 'selected' : ''}>도장</option>
+        </select>
+        <button class="btn-sig-draw" data-index="${index}" title="직접 그리기 서명패드 열기">
+          <i data-lucide="edit-3" style="width:12px; height:12px;"></i>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderDeptHeadSignatureDisplay(gradeData) {
+  const displayArea = document.getElementById('dept-signature-display');
+  const name = gradeData.deptHeadName;
+  const sign = gradeData.deptHeadSign;
+  const style = gradeData.deptHeadSigStyle;
+  const type = gradeData.deptHeadSignType;
+  
+  if (!name && !sign) {
     displayArea.innerHTML = `
-      <div class="signature-placeholder">
-        <i data-lucide="signature" style="width: 28px; height: 28px; color: var(--text-muted);"></i>
-        <span>이름을 입력하거나 클릭하여 서명하세요</span>
+      <div class="signature-placeholder" id="dept-placeholder">
+        <i data-lucide="signature" style="width: 24px; height: 24px; color: var(--text-muted);"></i>
+        <span>이름 입력 또는 서명란 클릭</span>
       </div>
     `;
     initLucide();
     return;
   }
   
-  // Clean display area
   displayArea.innerHTML = '';
   
   if (type === 'draw' && sign) {
-    // Canvas drawing signature
     const img = document.createElement('img');
     img.src = sign;
     img.className = 'signature-image';
     displayArea.appendChild(img);
   } else if (name) {
-    // Text-based signature font
     const container = document.createElement('div');
     if (style === 'seal') {
       container.className = 'sig-font-seal';
-      // Format name to fit in circular seal (up to 3-4 letters)
       let sealText = name;
       if (name.length === 3) sealText = `${name[0]}<br>${name[1]}${name[2]}`;
       else if (name.length === 2) sealText = `${name[0]}<br>${name[1]}인`;
@@ -237,126 +374,178 @@ function renderSignatureDisplay(role, classData) {
     displayArea.appendChild(container);
   }
   
-  // Add a reset/delete button
   const resetBtn = document.createElement('button');
   resetBtn.className = 'signature-reset-btn';
   resetBtn.innerHTML = '&times;';
   resetBtn.title = '서명 지우기';
   resetBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    clearSignature(role);
+    clearDeptHeadSignature();
   });
   displayArea.appendChild(resetBtn);
 }
 
-function clearSignature(role) {
-  const classData = db[currentDept][currentClass];
-  if (role === 'homeroom') {
-    classData.homeroomTeacher = '';
-    classData.homeroomSign = '';
-    classData.homeroomSignType = 'text';
-    document.getElementById('homeroom-teacher-name').value = '';
-  } else {
-    classData.departmentHead = '';
-    classData.departmentSign = '';
-    classData.deptHeadSignType = 'text';
-    document.getElementById('dept-head-name').value = '';
-  }
+function clearDeptHeadSignature() {
+  const gradeData = db[currentDate][currentGrade];
+  gradeData.deptHeadName = '';
+  gradeData.deptHeadSign = '';
+  gradeData.deptHeadSignType = 'text';
+  document.getElementById('dept-head-name').value = '';
   saveData();
   renderCurrentSheet();
-  showToast('서명이 삭제되었습니다.', 'info');
+  showToast('부장 확인 서명이 지워졌습니다.', 'info');
+}
+
+function clearRowSignature(index) {
+  const classRow = db[currentDate][currentGrade].classes[index];
+  classRow.signature = '';
+  classRow.signType = 'text';
+  saveData();
+  renderCurrentSheet();
+  showToast(`${classRow.deptClass}의 담임 서명이 삭제되었습니다.`, 'info');
 }
 
 // 5. Event Listeners initialization
 function initEventListeners() {
-  // Department Tab Click
-  document.getElementById('dept-tabs').addEventListener('click', (e) => {
+  // Date Selector Change
+  document.getElementById('sheet-date-input').addEventListener('change', (e) => {
+    const newDate = e.target.value;
+    if (newDate) {
+      currentDate = newDate;
+      ensureDateDataExists(currentDate);
+      updatePrintDateDisplay();
+      renderCurrentSheet();
+      renderStats();
+      showToast(`${currentDate} 대장을 불러왔습니다.`, 'info');
+    }
+  });
+
+  // Grade Navigation Tabs Click
+  document.getElementById('grade-tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('.tab-btn');
     if (btn) {
-      currentDept = btn.dataset.dept;
-      currentClass = 1; // Reset to class 1 when changing department
-      renderTabs();
+      currentGrade = parseInt(btn.dataset.grade);
+      renderGradeTabs();
       renderCurrentSheet();
     }
   });
 
-  // Class Tab Click
-  document.getElementById('class-tabs').addEventListener('click', (e) => {
-    const btn = e.target.closest('.sub-tab-btn');
-    if (btn) {
-      currentClass = parseInt(btn.dataset.class);
-      renderTabs();
-      renderCurrentSheet();
-    }
-  });
-
-  // Cell inputs tracking
-  document.getElementById('student-table-body').addEventListener('input', (e) => {
-    const input = e.target.closest('.grid-input');
-    if (input) {
-      const field = input.dataset.field;
-      const index = parseInt(input.dataset.index);
-      const value = input.value;
-      
-      db[currentDept][currentClass].students[index][field] = value;
-      saveData();
-    }
-  });
-
-  // Teacher Name Inputs (Realtime Text Signature)
-  document.getElementById('homeroom-teacher-name').addEventListener('input', (e) => {
-    const name = e.target.value;
-    const classData = db[currentDept][currentClass];
-    classData.homeroomTeacher = name;
-    if (classData.homeroomSignType !== 'draw') {
-      classData.homeroomSign = name ? name : '';
-    }
-    saveData();
-    renderSignatureDisplay('homeroom', classData);
-  });
-
-  document.getElementById('dept-head-name').addEventListener('input', (e) => {
-    const name = e.target.value;
-    const classData = db[currentDept][currentClass];
-    classData.departmentHead = name;
-    if (classData.deptHeadSignType !== 'draw') {
-      classData.departmentSign = name ? name : '';
-    }
-    saveData();
-    renderSignatureDisplay('deptHead', classData);
-  });
-
-  // Signature Font Style Drops
-  document.getElementById('homeroom-sig-style').addEventListener('change', (e) => {
-    const style = e.target.value;
-    const classData = db[currentDept][currentClass];
-    classData.homeroomSigStyle = style;
-    classData.homeroomSignType = 'text'; // Override canvas when style is changed manually
-    saveData();
-    renderCurrentSheet();
-  });
-
-  document.getElementById('dept-head-sig-style').addEventListener('change', (e) => {
-    const style = e.target.value;
-    const classData = db[currentDept][currentClass];
-    classData.deptHeadSigStyle = style;
-    classData.deptHeadSignType = 'text';
-    saveData();
-    renderCurrentSheet();
-  });
-
-  // Direct Sign button opens Canvas Modal
-  document.getElementById('homeroom-draw-btn').addEventListener('click', () => openSignatureModal('homeroom'));
-  document.getElementById('homeroom-signature-display').addEventListener('click', (e) => {
-    if (!e.target.closest('.signature-reset-btn')) {
-      openSignatureModal('homeroom');
-    }
-  });
+  // Table row elements interaction tracking (Event Delegation)
+  const tableBody = document.getElementById('class-table-body');
   
-  document.getElementById('dept-draw-btn').addEventListener('click', () => openSignatureModal('deptHead'));
+  tableBody.addEventListener('input', (e) => {
+    const el = e.target;
+    const field = el.dataset.field;
+    const index = parseInt(el.dataset.index);
+    if (!field || isNaN(index)) return;
+    
+    const classRow = db[currentDate][currentGrade].classes[index];
+    let val = el.value;
+    
+    if (field === 'grade') val = parseInt(val);
+    if (field === 'quantity') val = parseInt(val) || 0;
+    
+    classRow[field] = val;
+    
+    // Auto-update signature display when teacher name is typed
+    if (field === 'teacherName') {
+      if (classRow.signType !== 'draw') {
+        classRow.signature = val ? val : '';
+      }
+      // Re-render only that cell's content to avoid losing focus if possible, 
+      // but for simplicity we re-render sheet
+      saveData();
+      renderCurrentSheet();
+      // Keep focus on the active input element
+      const inputs = document.querySelectorAll(`input[data-field="teacherName"]`);
+      if (inputs[index]) {
+        inputs[index].focus();
+        inputs[index].setSelectionRange(val.length, val.length);
+      }
+      return;
+    }
+    
+    saveData();
+  });
+
+  tableBody.addEventListener('change', (e) => {
+    const el = e.target;
+    const field = el.dataset.field;
+    const index = parseInt(el.dataset.index);
+    if (!field || isNaN(index)) return;
+    
+    const classRow = db[currentDate][currentGrade].classes[index];
+    
+    if (field === 'sigStyle') {
+      classRow.sigStyle = el.value;
+      classRow.signType = 'text'; // override canvas drawing on change
+      saveData();
+      renderCurrentSheet();
+      return;
+    }
+    
+    if (field === 'chargingCabinet' || field === 'grade') {
+      const val = field === 'grade' ? parseInt(el.value) : el.value;
+      classRow[field] = val;
+      saveData();
+      renderCurrentSheet();
+    }
+  });
+
+  // Handle buttons and signature display click inside table rows
+  tableBody.addEventListener('click', (e) => {
+    // 1. Reset signature button
+    const resetBtn = e.target.closest('.row-sig-reset');
+    if (resetBtn) {
+      e.stopPropagation();
+      const index = parseInt(resetBtn.dataset.index);
+      clearRowSignature(index);
+      return;
+    }
+    
+    // 2. Draw signature button click
+    const drawBtn = e.target.closest('.btn-sig-draw');
+    if (drawBtn) {
+      const index = parseInt(drawBtn.dataset.index);
+      openRowSignatureModal(index);
+      return;
+    }
+    
+    // 3. Row signature area click (Alternative to draw button)
+    const sigDisplay = e.target.closest('.row-sig-display');
+    if (sigDisplay && !e.target.closest('.row-sig-reset')) {
+      const index = parseInt(sigDisplay.dataset.index);
+      openRowSignatureModal(index);
+    }
+  });
+
+  // Dept Head Name change
+  document.getElementById('dept-head-name').addEventListener('input', (e) => {
+    const val = e.target.value;
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.deptHeadName = val;
+    if (gradeData.deptHeadSignType !== 'draw') {
+      gradeData.deptHeadSign = val ? val : '';
+    }
+    saveData();
+    renderDeptHeadSignatureDisplay(gradeData);
+  });
+
+  // Dept Head Style Dropdown change
+  document.getElementById('dept-head-sig-style').addEventListener('change', (e) => {
+    const val = e.target.value;
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.deptHeadSigStyle = val;
+    gradeData.deptHeadSignType = 'text';
+    saveData();
+    renderCurrentSheet();
+  });
+
+  // Dept Head Sign Canvas open
+  document.getElementById('dept-draw-btn').addEventListener('click', () => openDeptHeadSignatureModal());
   document.getElementById('dept-signature-display').addEventListener('click', (e) => {
     if (!e.target.closest('.signature-reset-btn')) {
-      openSignatureModal('deptHead');
+      openDeptHeadSignatureModal();
     }
   });
 
@@ -373,11 +562,17 @@ function initEventListeners() {
 
   // Reset to Sample
   document.getElementById('btn-reset-current').addEventListener('click', () => {
-    if (confirm(`현재 [${currentDept} ${currentClass}반] 데이터를 초기 기본값으로 복구하시겠습니까?\n작성 중이던 서명과 데이터가 유실됩니다.`)) {
-      db[currentDept][currentClass] = generateInitialClassData(currentDept, currentClass);
+    if (confirm(`현재 [${currentGrade}학년] 대장을 초기 기본값으로 복구하시겠습니까?\n작성 중이던 서명과 데이터가 모두 유실됩니다.`)) {
+      db[currentDate][currentGrade] = {
+        classes: generateInitialClasses(currentGrade),
+        deptHeadName: '',
+        deptHeadSign: '',
+        deptHeadSigStyle: '1',
+        deptHeadSignType: 'text'
+      };
       saveData();
       renderCurrentSheet();
-      showToast('샘플 데이터 복원이 완료되었습니다.', 'success');
+      showToast('대장이 복원되었습니다.', 'success');
     }
   });
 
@@ -401,17 +596,15 @@ function initEventListeners() {
   document.getElementById('btn-load-url').addEventListener('click', loadGoogleSheetCSV);
 }
 
-// 6. Signature Modal & Canvas Control
+// 6. Signature Canvas Controllers
 function initCanvas() {
   canvas = document.getElementById('signature-canvas');
   ctx = canvas.getContext('2d');
   
-  // Set drawing options
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   
-  // Handle drawing events (Mouse & Touch)
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
@@ -419,7 +612,6 @@ function initCanvas() {
   
   canvas.addEventListener('touchstart', (e) => {
     const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
     startDrawing({
       clientX: touch.clientX,
       clientY: touch.clientY
@@ -438,7 +630,6 @@ function initCanvas() {
   
   canvas.addEventListener('touchend', stopDrawing);
 
-  // Color picker selection
   document.querySelectorAll('.color-dot').forEach(dot => {
     dot.addEventListener('click', (e) => {
       document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
@@ -447,30 +638,46 @@ function initCanvas() {
     });
   });
 
-  // Clear Canvas button
   document.getElementById('btn-clear-canvas').addEventListener('click', clearCanvas);
-
-  // Modal actions
   document.getElementById('modal-close-btn').addEventListener('click', closeSignatureModal);
   document.getElementById('btn-cancel-modal').addEventListener('click', closeSignatureModal);
   document.getElementById('btn-save-signature').addEventListener('click', saveCanvasSignature);
 }
 
-function openSignatureModal(role) {
-  drawTarget = role;
-  const nameInput = role === 'homeroom' ? 'homeroom-teacher-name' : 'dept-head-name';
-  const name = document.getElementById(nameInput).value.trim();
+function openRowSignatureModal(index) {
+  const classRow = db[currentDate][currentGrade].classes[index];
+  const name = (classRow.teacherName || '').trim();
   
   if (!name) {
-    alert('서명하기 전에 먼저 선생님 이름을 입력해주세요.');
-    document.getElementById(nameInput).focus();
+    alert('서명하기 전에 먼저 담임 성명을 입력해 주세요.');
+    const inputs = document.querySelectorAll(`input[data-field="teacherName"]`);
+    if (inputs[index]) inputs[index].focus();
     return;
   }
   
-  document.getElementById('modal-title').innerText = `${role === 'homeroom' ? '담임교사' : '부서부장'} [${name}] 직접 서명`;
-  document.getElementById('signature-modal').classList.add('active');
+  drawTargetRole = 'homeroom';
+  drawTargetRowIndex = index;
   
-  // Resize canvas according to container
+  document.getElementById('modal-title').innerText = `${classRow.deptClass} 담임교사 [${name}] 직접 서명`;
+  document.getElementById('signature-modal').classList.add('active');
+  setTimeout(resizeCanvas, 100);
+}
+
+function openDeptHeadSignatureModal() {
+  const gradeData = db[currentDate][currentGrade];
+  const name = (gradeData.deptHeadName || '').trim();
+  
+  if (!name) {
+    alert('서명하기 전에 부서 부장 성명을 입력해 주세요.');
+    document.getElementById('dept-head-name').focus();
+    return;
+  }
+  
+  drawTargetRole = 'deptHead';
+  drawTargetRowIndex = null;
+  
+  document.getElementById('modal-title').innerText = `부서 부장 [${name}] 직접 서명`;
+  document.getElementById('signature-modal').classList.add('active');
   setTimeout(resizeCanvas, 100);
 }
 
@@ -489,15 +696,12 @@ function clearCanvas() {
 function startDrawing(e) {
   isDrawing = true;
   const rect = canvas.getBoundingClientRect();
-  
-  // Handle coordinate mapping accurately for different scales
   lastX = (e.clientX - rect.left) * (canvas.width / rect.width);
   lastY = (e.clientY - rect.top) * (canvas.height / rect.height);
 }
 
 function draw(e) {
   if (!isDrawing) return;
-  
   const rect = canvas.getBoundingClientRect();
   const currentX = (e.clientX - rect.left) * (canvas.width / rect.width);
   const currentY = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -522,25 +726,25 @@ function closeSignatureModal() {
 }
 
 function saveCanvasSignature() {
-  // Save canvas as image Base64 URL
   const dataURL = canvas.toDataURL('image/png');
-  const classData = db[currentDept][currentClass];
   
-  if (drawTarget === 'homeroom') {
-    classData.homeroomSign = dataURL;
-    classData.homeroomSignType = 'draw';
-  } else {
-    classData.departmentSign = dataURL;
-    classData.deptHeadSignType = 'draw';
+  if (drawTargetRole === 'homeroom') {
+    const classRow = db[currentDate][currentGrade].classes[drawTargetRowIndex];
+    classRow.signature = dataURL;
+    classRow.signType = 'draw';
+  } else if (drawTargetRole === 'deptHead') {
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.deptHeadSign = dataURL;
+    gradeData.deptHeadSignType = 'draw';
   }
   
   saveData();
   renderCurrentSheet();
   closeSignatureModal();
-  showToast('서명이 삽입되었습니다.', 'success');
+  showToast('서명이 안전하게 삽입되었습니다.', 'success');
 }
 
-// 7. Data Import & Export Logic
+// 7. Data Import & Export logic
 function parseCSV(text) {
   const lines = [];
   let row = [""];
@@ -554,7 +758,7 @@ function parseCSV(text) {
       if (c === '"') {
         if (next === '"') {
           row[row.length - 1] += '"';
-          i++; // Skip next quote
+          i++;
         } else {
           inQuotes = false;
         }
@@ -581,24 +785,21 @@ function parseCSV(text) {
   return lines;
 }
 
-function importCSVToCurrentClass(rows) {
-  // Basic sanity check
+function importCSVToCurrentClasses(rows) {
   if (rows.length === 0) {
     showToast('파싱할 데이터가 없습니다.', 'error');
     return;
   }
   
-  // Try to find headers and filter out metadata rows
   let headerIndex = -1;
   for (let i = 0; i < Math.min(5, rows.length); i++) {
     const rowStr = rows[i].join(' ').toLowerCase();
-    if (rowStr.includes('이름') || rowStr.includes('성명') || rowStr.includes('학생') || rowStr.includes('크롬북') || rowStr.includes('연번')) {
+    if (rowStr.includes('반') || rowStr.includes('담임') || rowStr.includes('학과') || rowStr.includes('수량') || rowStr.includes('학년')) {
       headerIndex = i;
       break;
     }
   }
   
-  // Extract data rows
   const dataStart = headerIndex + 1;
   const rawDataRows = rows.slice(dataStart).filter(r => r.some(cell => cell.trim() !== ""));
   
@@ -607,60 +808,68 @@ function importCSVToCurrentClass(rows) {
     return;
   }
   
-  // Try to map columns based on header or typical patterns
-  let nameCol = 2; // Default guesses
-  let cbCol = 1;
-  let snCol = 3;
-  let remCol = 4;
+  let gradeCol = 0;
+  let deptClassCol = 1;
+  let teacherCol = 2;
+  let qtyCol = 3;
+  let cabinetCol = 4;
   
   if (headerIndex !== -1) {
     const headers = rows[headerIndex];
     headers.forEach((h, idx) => {
       const headerText = h.trim();
-      if (headerText.includes('이름') || headerText.includes('성명')) nameCol = idx;
-      else if (headerText.includes('크롬북') || headerText.includes('ID') || headerText.includes('관리번호') || headerText.includes('아이디')) cbCol = idx;
-      else if (headerText.includes('일련번호') || headerText.includes('SN') || headerText.includes('S/N')) snCol = idx;
-      else if (headerText.includes('비고') || headerText.includes('특이')) remCol = idx;
+      if (headerText.includes('학년')) gradeCol = idx;
+      else if (headerText.includes('반') || headerText.includes('학과')) deptClassCol = idx;
+      else if (headerText.includes('담임') || headerText.includes('교사') || headerText.includes('성명')) teacherCol = idx;
+      else if (headerText.includes('수량') || headerText.includes('대수') || headerText.includes('개수')) qtyCol = idx;
+      else if (headerText.includes('충전함') || headerText.includes('이상') || headerText.includes('유무') || headerText.includes('상태')) cabinetCol = idx;
     });
   }
   
-  const classData = db[currentDept][currentClass];
-  const newStudents = [];
+  const currentGradeData = db[currentDate][currentGrade];
+  const newClasses = [];
   
-  // We limit or pad to STUDENTS_PER_CLASS (18) as specified by user, but let it grow if user provided more
-  const rowLimit = Math.max(STUDENTS_PER_CLASS, rawDataRows.length);
-  
-  for (let i = 0; i < rowLimit; i++) {
-    const row = rawDataRows[i];
-    const numStr = String(i + 1).padStart(2, '0');
+  rawDataRows.forEach((row) => {
+    // Determine row grade
+    let parsedGrade = currentGrade;
+    if (row[gradeCol]) {
+      const gStr = row[gradeCol].replace(/[^0-9]/g, '');
+      if (gStr === '1' || gStr === '2') {
+        parsedGrade = parseInt(gStr);
+      }
+    }
     
-    if (row) {
-      newStudents.push({
-        id: i + 1,
-        studentName: row[nameCol] ? row[nameCol].trim() : `학생${i+1}`,
-        chromebookId: row[cbCol] ? row[cbCol].trim() : `CB-${DEPT_CODES[currentDept]}-1-${currentClass}-${numStr}`,
-        serialNumber: row[snCol] ? row[snCol].trim() : `SN-${DEPT_CODES[currentDept]}-2026-${currentClass}-${numStr}`,
-        remarks: row[remCol] ? row[remCol].trim() : ''
-      });
-    } else {
-      // Pad empty rows
-      newStudents.push({
-        id: i + 1,
-        studentName: '',
-        chromebookId: `CB-${DEPT_CODES[currentDept]}-1-${currentClass}-${numStr}`,
-        serialNumber: '',
-        remarks: ''
+    // Only load classes belonging to currentGrade (unless everything is in one table)
+    if (parsedGrade === currentGrade) {
+      let cabStatus = 'normal';
+      const rawCabVal = row[cabinetCol] ? row[cabinetCol].trim() : '';
+      if (rawCabVal.includes('점검') || rawCabVal.includes('필요') || rawCabVal.includes('보수')) cabStatus = 'warning';
+      else if (rawCabVal.includes('이상') && (rawCabVal.includes('있음') || rawCabVal.includes('불량') || rawCabVal.includes('고장'))) cabStatus = 'danger';
+      
+      newClasses.push({
+        grade: currentGrade,
+        deptClass: row[deptClassCol] ? row[deptClassCol].trim() : `전공반`,
+        teacherName: row[teacherCol] ? row[teacherCol].trim() : '',
+        quantity: row[qtyCol] ? (parseInt(row[qtyCol].replace(/[^0-9]/g, '')) || 0) : 18,
+        chargingCabinet: cabStatus,
+        signature: '',
+        sigStyle: '1',
+        signType: 'text'
       });
     }
+  });
+  
+  if (newClasses.length === 0) {
+    showToast('현재 학년에 일치하는 데이터를 찾지 못했습니다.', 'error');
+    return;
   }
   
-  classData.students = newStudents;
+  currentGradeData.classes = newClasses;
   saveData();
   renderCurrentSheet();
-  showToast(`${rawDataRows.length}명의 학생 데이터를 성공적으로 가져왔습니다.`, 'success');
+  showToast(`${newClasses.length}개 학급 데이터를 가져왔습니다.`, 'success');
 }
 
-// Fetch Google Sheet CSV published url
 async function loadGoogleSheetCSV() {
   const url = document.getElementById('sheet-url-input').value.trim();
   if (!url) {
@@ -669,7 +878,7 @@ async function loadGoogleSheetCSV() {
   }
   
   if (!url.includes('docs.google.com/spreadsheets') || !url.includes('output=csv')) {
-    alert('올바른 구글 시트 CSV 게시 링크 주소가 아닙니다. [웹에 게시]를 CSV 옵션으로 내보낸 주소여야 합니다.');
+    alert('올바른 구글 시트 CSV 게시 링크 주소가 아닙니다.');
     return;
   }
   
@@ -681,16 +890,15 @@ async function loadGoogleSheetCSV() {
     
     const csvText = await response.text();
     const rows = parseCSV(csvText);
-    importCSVToCurrentClass(rows);
+    importCSVToCurrentClasses(rows);
     document.getElementById('sheet-url-input').value = '';
   } catch (error) {
     console.error("구글 시트 로드 실패:", error);
-    alert('구글 시트 데이터를 가져오지 못했습니다.\n네트워크 차단(CORS) 오류이거나 링크 설정 오류일 수 있습니다. 아래 [복사한 데이터 붙여넣기] 기능을 이용하시면 오류 없이 데이터 적용이 가능합니다.');
+    alert('CORS 오류 또는 네트워크 장벽으로 인해 연동이 차단되었습니다. 복사-붙여넣기 탭 기능을 이용해 주세요!');
     showToast('구글 시트 연동 실패', 'error');
   }
 }
 
-// Paste text parsing (TSV/CSV)
 function importClipboardData() {
   const text = document.getElementById('clipboard-textarea').value.trim();
   if (!text) {
@@ -698,7 +906,6 @@ function importClipboardData() {
     return;
   }
   
-  // Detect TSV (Tabs) vs CSV (Commas)
   const rows = [];
   const lines = text.split('\n');
   
@@ -706,54 +913,54 @@ function importClipboardData() {
     if (line.includes('\t')) {
       rows.push(line.split('\t'));
     } else {
-      // fallback to CSV parse
       rows.push(line.split(','));
     }
   });
   
-  importCSVToCurrentClass(rows);
+  importCSVToCurrentClasses(rows);
   document.getElementById('clipboard-textarea').value = '';
   document.getElementById('clipboard-panel').classList.remove('active');
 }
 
-// Export sheet grid to local CSV file
 function exportToCSV() {
-  const classData = db[currentDept][currentClass];
+  const gradeData = db[currentDate][currentGrade];
   
-  let csvContent = "\ufeff"; // BOM for excel Korean charset support
-  csvContent += `학과,반,연번,크롬북 ID,학생 이름,일련번호(S/N),비고\n`;
+  let csvContent = "\ufeff"; // BOM
+  csvContent += `검수 일자,${currentDate}\n`;
+  csvContent += `학년,반(학과명 포함),담임교사,크롬북 수량,충전함 상태,담임 서명 여부\n`;
   
-  classData.students.forEach(student => {
+  gradeData.classes.forEach(cls => {
+    let cabinetText = '이상 없음';
+    if (cls.chargingCabinet === 'warning') cabinetText = '점검 필요';
+    if (cls.chargingCabinet === 'danger') cabinetText = '이상 있음';
+    
     const row = [
-      currentDept,
-      `${currentClass}반`,
-      student.id,
-      `"${student.chromebookId.replace(/"/g, '""')}"`,
-      `"${student.studentName.replace(/"/g, '""')}"`,
-      `"${student.serialNumber.replace(/"/g, '""')}"`,
-      `"${student.remarks.replace(/"/g, '""')}"`
+      `${cls.grade}학년`,
+      `"${cls.deptClass.replace(/"/g, '""')}"`,
+      `"${cls.teacherName.replace(/"/g, '""')}"`,
+      cls.quantity,
+      cabinetText,
+      cls.signature ? '서명완료' : '서명누락'
     ];
     csvContent += row.join(",") + "\n";
   });
   
-  // Add signature state at bottom of csv
   csvContent += `\n`;
-  csvContent += `담임교사 서명,${classData.homeroomTeacher || ''},(${classData.homeroomSign ? '서명완료' : '서명누락'})\n`;
-  csvContent += `부서부장 서명,${classData.departmentHead || ''},(${classData.departmentSign ? '서명완료' : '서명누락'})\n`;
+  csvContent += `부서부장 최종 확인 결재,${gradeData.deptHeadName || ''},(${gradeData.deptHeadSign ? '결재완료' : '미결재'})\n`;
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `크롬북관리대장_${currentDept}_${currentClass}반.csv`);
+  link.setAttribute("download", `영남공고_크롬북대장_${currentGrade}학년_${currentDate}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  showToast('CSV 파일이 성공적으로 다운로드되었습니다.', 'success');
+  showToast('CSV 내보내기가 완료되었습니다.', 'success');
 }
 
-// 8. Visual theme control (Light/Dark mode)
+// 8. Visual theme control
 function toggleTheme() {
   const html = document.documentElement;
   const currentTheme = html.getAttribute('data-theme');
