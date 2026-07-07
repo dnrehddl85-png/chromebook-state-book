@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1학년 크롬북 관리 대장 및 전자 서명 시스템</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="logo-section">
+      <div class="logo-icon">
+        <i data-lucide="tablet"></i>
+      </div>
+      <div class="logo-title">
+        <h1>크롬북 관리 대장</h1>
+        <p>1학년 전동제어 · DSW · 로보틱스 · 소재에너지</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="theme-toggle" title="다크 모드 토글">
+        <i data-lucide="moon"></i>
+        <span>다크 모드</span>
+      </button>
+      <button class="btn btn-primary" id="print-btn">
+        <i data-lucide="printer"></i>
+        <span>대장 인쇄 / PDF</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon"><i data-lucide="graduation-cap"></i></div>
+        <div class="stat-info">
+          <h4 id="stat-departments">4개 학과</h4>
+          <p>전체 관리 대상</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i data-lucide="users"></i></div>
+        <div class="stat-info">
+          <h4 id="stat-classes">12개 학급</h4>
+          <p>각 학과당 3개 학급</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i data-lucide="laptop"></i></div>
+        <div class="stat-info">
+          <h4 id="stat-students">216명</h4>
+          <p>학급당 18명 배정</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i data-lucide="signature"></i></div>
+        <div class="stat-info">
+          <h4 id="stat-signatures">0 / 24</h4>
+          <p>서명 완료 (담임/부장)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Control Panel -->
+    <div class="panel">
+      <div class="panel-title">
+        <i data-lucide="link"></i>
+        <h3>데이터 가져오기 및 연동</h3>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: -10px;">
+        구글 시트의 [파일] > [공유] > [웹에 게시]를 클릭한 후 <strong>CSV 형식</strong>으로 게시된 웹 링크 주소를 입력하거나, 구글 시트 데이터를 복사해서 붙여넣으세요.
+      </p>
+      <div class="input-group">
+        <input type="text" id="sheet-url-input" class="input-text" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv">
+        <button class="btn btn-primary" id="btn-load-url">웹 링크 연동</button>
+        <button class="btn" id="btn-toggle-clipboard">복사한 데이터 붙여넣기</button>
+      </div>
+
+      <!-- Clipboard Text Area Paste Section -->
+      <div class="clipboard-area" id="clipboard-panel">
+        <label for="clipboard-textarea" style="font-size: 0.85rem; font-weight: 600;">구글 시트 복사 영역 붙여넣기 (Ctrl + V):</label>
+        <textarea id="clipboard-textarea" class="input-textarea" placeholder="구글 시트에서 연번, 크롬북ID, 학생이름, 일련번호 등이 적힌 영역을 복사해서 여기에 붙여넣으세요. (첫 줄에 제목이 포함되어도 자동으로 파싱됩니다)"></textarea>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
+          <button class="btn btn-danger btn-sm" id="btn-close-clipboard">닫기</button>
+          <button class="btn btn-primary btn-sm" id="btn-import-clipboard">데이터 적용</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-container">
+      <div class="tabs-row" id="dept-tabs">
+        <!-- Javascript renders department buttons here -->
+      </div>
+      <div class="sub-tabs-row" id="class-tabs">
+        <!-- Javascript renders class buttons here -->
+      </div>
+    </div>
+
+    <!-- Main Sheet Grid Card -->
+    <div class="sheet-card" id="printable-sheet">
+      <div class="sheet-title-area">
+        <div class="sheet-title-text">
+          <h2 id="current-sheet-title">전동제어과 1학년 1반 크롬북 관리 대장</h2>
+          <p id="current-sheet-subtitle">정원: 18명 | 크롬북 배정 및 상태 점검표</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="btn-reset-current" title="현재 학급 데이터를 기본 샘플로 리셋">
+            <i data-lucide="rotate-ccw"></i>
+            <span>샘플 복원</span>
+          </button>
+          <button class="btn" id="btn-export-csv" title="현재 표의 데이터를 CSV 파일로 다운로드">
+            <i data-lucide="download"></i>
+            <span>CSV 저장</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Table UI -->
+      <div class="table-wrapper">
+        <table class="sheet-table" id="student-table">
+          <thead>
+            <tr>
+              <th style="width: 80px; text-align: center;">연번</th>
+              <th style="width: 250px;">크롬북 ID (관리번호)</th>
+              <th style="width: 180px;">학생 이름</th>
+              <th style="width: 250px;">일련번호 (S/N)</th>
+              <th>비고 (상태/특이사항)</th>
+            </tr>
+          </thead>
+          <tbody id="student-table-body">
+            <!-- Student rows generated dynamically -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Signatures Footer -->
+      <div class="signatures-container">
+        <!-- Homeroom Teacher Signature -->
+        <div class="signature-box">
+          <div class="signature-label">
+            <i data-lucide="user-check"></i>
+            <span>담임교사 확인 서명</span>
+          </div>
+          <div class="signature-input-row">
+            <input type="text" id="homeroom-teacher-name" class="input-text" placeholder="담임교사 성명 입력">
+            <select id="homeroom-sig-style" class="style-select">
+              <option value="1">손글씨 1 (펜)</option>
+              <option value="2">손글씨 2 (붓)</option>
+              <option value="3">개성체 (독도)</option>
+              <option value="4">영문 서명</option>
+              <option value="seal">확인 도장</option>
+            </select>
+            <button class="btn btn-primary" id="homeroom-draw-btn" title="직접 그리기 서명패드 열기">
+              <i data-lucide="edit-3"></i>
+              <span>직접 서명</span>
+            </button>
+          </div>
+          <div class="signature-display-area" id="homeroom-signature-display">
+            <div class="signature-placeholder" id="homeroom-placeholder">
+              <i data-lucide="signature" style="width: 32px; height: 32px;"></i>
+              <span>이름을 입력하거나 클릭하여 서명하세요</span>
+            </div>
+            <!-- Rendered signature will sit here -->
+          </div>
+        </div>
+
+        <!-- Department Head Signature -->
+        <div class="signature-box">
+          <div class="signature-label">
+            <i data-lucide="shield-check"></i>
+            <span>부서 부장 확인 서명</span>
+          </div>
+          <div class="signature-input-row">
+            <input type="text" id="dept-head-name" class="input-text" placeholder="부서 부장 성명 입력">
+            <select id="dept-head-sig-style" class="style-select">
+              <option value="1">손글씨 1 (펜)</option>
+              <option value="2">손글씨 2 (붓)</option>
+              <option value="3">개성체 (독도)</option>
+              <option value="4">영문 서명</option>
+              <option value="seal">확인 도장</option>
+            </select>
+            <button class="btn btn-primary" id="dept-draw-btn" title="직접 그리기 서명패드 열기">
+              <i data-lucide="edit-3"></i>
+              <span>직접 서명</span>
+            </button>
+          </div>
+          <div class="signature-display-area" id="dept-signature-display">
+            <div class="signature-placeholder" id="dept-placeholder">
+              <i data-lucide="signature" style="width: 32px; height: 32px;"></i>
+              <span>이름을 입력하거나 클릭하여 서명하세요</span>
+            </div>
+            <!-- Rendered signature will sit here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drawing Signature Modal -->
+  <div class="modal-overlay" id="signature-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">직접 그리기 서명</h3>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: var(--text-secondary);">마우스 드래그 또는 터치 스크린으로 아래 캔버스 영역에 서명해 주세요.</p>
+        <div class="canvas-container">
+          <canvas id="signature-canvas"></canvas>
+        </div>
+        <div class="canvas-actions">
+          <div class="brush-settings">
+            <span>색상:</span>
+            <!-- Black ink -->
+            <div class="color-dot active" data-color="#1e3a8a" style="background-color: #1e3a8a;"></div>
+            <!-- Red ink -->
+            <div class="color-dot" data-color="#ef4444" style="background-color: #ef4444;"></div>
+            <!-- Charcoal -->
+            <div class="color-dot" data-color="#0f172a" style="background-color: #0f172a;"></div>
+          </div>
+          <button class="btn btn-danger btn-sm" id="btn-clear-canvas">
+            <i data-lucide="trash-2"></i>
+            <span>지우기</span>
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" id="btn-cancel-modal">취소</button>
+        <button class="btn btn-primary" id="btn-save-signature">서명 삽입</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Footer -->
+  <footer class="main-footer">
+    <p>&copy; 2026 Chromebook State Book Manager. Built for smart school environments.</p>
+  </footer>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">
+    <i data-lucide="check-circle" id="toast-icon"></i>
+    <span id="toast-message">메시지 내용</span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
