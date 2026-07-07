@@ -2,7 +2,8 @@
 
 // 1. Initial configuration and core constants
 const GRADES = [1, 2];
-const DB_KEY = 'chromebook_summary_ledger_v6'; // 데이터 구조 및 서명 메커니즘 개편에 따른 캐시 충돌 방지용 키 업데이트
+const DB_KEY = 'chromebook_summary_ledger_v6'; 
+const FIREBASE_CONFIG_KEY = 'chromebook_firebase_config';
 
 // Departments configuration for initial setup
 const DEPT_1 = ['소재', '전동', '로보', '데이터소프트'];
@@ -12,6 +13,12 @@ const DEPT_2 = ['화공', '스마트패션', '전기정보', '스마트융합', 
 let db = null;
 let currentGrade = 1; // 1 or 2
 let currentDate = ''; // Format: YYYY-MM-DD
+
+// Firebase Sync State
+let firebaseApp = null;
+let firebaseDb = null;
+let firebaseRef = null;
+let isFirebaseConnected = false;
 
 // Canvas Drawing State
 let canvas = null;
@@ -69,6 +76,7 @@ function updatePrintDateDisplay() {
 
 // 3. Data Loading & Generation
 function loadData() {
+  // 1. Load local mock data
   const savedData = localStorage.getItem(DB_KEY);
   if (savedData) {
     try {
@@ -82,6 +90,17 @@ function loadData() {
   }
   
   ensureDateDataExists(currentDate);
+
+  // 2. Load and connect Firebase if configuration exists
+  const savedFirebaseConfig = localStorage.getItem(FIREBASE_CONFIG_KEY);
+  if (savedFirebaseConfig) {
+    try {
+      const config = JSON.parse(savedFirebaseConfig);
+      connectToFirebase(config);
+    } catch (e) {
+      console.error("저장된 Firebase 설정 로드 실패", e);
+    }
+  }
 }
 
 function getLatestAvailableDateBefore(targetDate) {
@@ -122,7 +141,6 @@ function ensureDateDataExists(dateStr) {
         vicePrincipalSignType: 'text'
       };
     } else {
-      // Generate default data
       db[dateStr][grade] = {
         classes: generateInitialClasses(grade),
         deptHeadName: '',
@@ -144,7 +162,6 @@ function generateInitialClasses(grade) {
   const classesList = [];
   
   if (grade === 1) {
-    // 1학년: 4개 학과당 3개 학급 (소재, 전동, 로보, 데이터소프트 순)
     DEPT_1.forEach(dept => {
       for (let ban = 1; ban <= 3; ban++) {
         classesList.push({
@@ -160,7 +177,6 @@ function generateInitialClasses(grade) {
       }
     });
   } else if (grade === 2) {
-    // 2학년: 스마트융합만 3개 학급, 나머지는 2개 학급
     DEPT_2.forEach(dept => {
       const bansCount = (dept === '스마트융합') ? 3 : 2;
       for (let ban = 1; ban <= bansCount; ban++) {
@@ -184,9 +200,230 @@ function generateInitialClasses(grade) {
 function saveData() {
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   renderStats();
+  
+  // Sync changes to Firebase in real-time
+  syncDataToFirebase();
 }
 
-// 4. UI Rendering Functions
+// 4. Firebase Concurrency Sync Logic
+function parseFirebaseConfig(text) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    try {
+      const config = {};
+      const fields = [
+        'apiKey', 'authDomain', 'databaseURL', 'projectId', 
+        'storageBucket', 'messagingSenderId', 'appId'
+      ];
+      
+      fields.forEach(field => {
+        const regex = new RegExp(`${field}\\s*:\\s*["']([^"']+)["']`);
+        const match = text.match(regex);
+        if (match && match[1]) {
+          config[field] = match[1];
+        }
+      });
+      
+      if (config.apiKey && (config.databaseURL || config.projectId)) {
+        return config;
+      }
+    } catch (err) {
+      console.error("Config 파싱 오류", err);
+    }
+  }
+  return null;
+}
+
+function connectToFirebase(config) {
+  if (!window.firebase) {
+    console.error("Firebase SDK가 로드되지 않았습니다.");
+    updateServerBadge(false, "연결 실패");
+    return;
+  }
+  
+  // Handle app disposal if already exists
+  if (window.firebase.apps.length > 0) {
+    window.firebase.app().delete().then(setupFirebase);
+  } else {
+    setupFirebase();
+  }
+  
+  function setupFirebase() {
+    try {
+      firebaseApp = window.firebase.initializeApp(config);
+      firebaseDb = window.firebase.database();
+      
+      // Monitor connection status
+      const connectedRef = firebaseDb.ref(".info/connected");
+      connectedRef.on("value", (snap) => {
+        if (snap.val() === true) {
+          isFirebaseConnected = true;
+          updateServerBadge(true, "서버 연결됨");
+          document.getElementById('firebase-connection-status').innerText = "연결 완료 (실시간 동기화 중)";
+          document.getElementById('firebase-connection-status').style.color = "var(--success-color)";
+          document.getElementById('btn-disconnect-server').style.display = "block";
+          
+          // Start syncing listeners
+          startFirebaseSyncListener();
+        } else {
+          isFirebaseConnected = false;
+          updateServerBadge(false, "서버 끊김");
+          document.getElementById('firebase-connection-status').innerText = "서버 연결 해제됨";
+          document.getElementById('firebase-connection-status').style.color = "var(--text-muted)";
+        }
+      });
+      
+      // Save configuration locally
+      localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
+    } catch (err) {
+      console.error("Firebase 연결 실패", err);
+      alert("Firebase 설정 정보가 유효하지 않습니다.");
+      updateServerBadge(false, "설정 오류");
+    }
+  }
+}
+
+function updateServerBadge(connected, text) {
+  const badge = document.getElementById('server-status-badge');
+  const btn = document.getElementById('btn-open-server-settings');
+  
+  if (badge && btn) {
+    badge.innerText = text;
+    if (connected) {
+      btn.style.borderColor = "var(--success-color)";
+      btn.style.color = "var(--success-color)";
+      btn.style.backgroundColor = "rgba(16, 185, 129, 0.05)";
+    } else {
+      btn.style.borderColor = "var(--border-color)";
+      btn.style.color = "var(--text-primary)";
+      btn.style.backgroundColor = "var(--bg-secondary)";
+    }
+  }
+}
+
+function disconnectFirebase() {
+  if (firebaseRef) {
+    firebaseRef.off();
+    firebaseRef = null;
+  }
+  
+  if (window.firebase && window.firebase.apps.length > 0) {
+    window.firebase.app().delete();
+  }
+  
+  isFirebaseConnected = false;
+  localStorage.removeItem(FIREBASE_CONFIG_KEY);
+  updateServerBadge(false, "서버 연동");
+  
+  document.getElementById('firebase-connection-status').innerText = "연결되지 않음";
+  document.getElementById('firebase-connection-status').style.color = "var(--text-muted)";
+  document.getElementById('btn-disconnect-server').style.display = "none";
+  document.getElementById('firebase-config-textarea').value = '';
+  
+  showToast("서버 연결이 해제되고 로컬 모드로 전환되었습니다.", "info");
+}
+
+function startFirebaseSyncListener() {
+  if (!isFirebaseConnected || !firebaseDb) return;
+  
+  if (firebaseRef) {
+    firebaseRef.off();
+  }
+  
+  firebaseRef = firebaseDb.ref(`ledgers/${currentDate}/${currentGrade}`);
+  
+  // Listen for real-time remote edits
+  firebaseRef.on('value', (snapshot) => {
+    const serverData = snapshot.val();
+    if (serverData) {
+      // Merge remote data into local database
+      if (!db[currentDate]) db[currentDate] = {};
+      db[currentDate][currentGrade] = serverData;
+      
+      // FOCUS PRESERVATION: If any grid cell input is focused, only update non-focused cells
+      const activeEl = document.activeElement;
+      const isInputActive = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT') && activeEl.classList.contains('grid-input');
+      
+      if (!isInputActive) {
+        renderCurrentSheet();
+        renderStats();
+      } else {
+        renderStats();
+        updateNonFocusedCells(serverData);
+      }
+    } else {
+      // First initialization on Firebase server: push current local state
+      syncDataToFirebase();
+    }
+  });
+}
+
+function updateNonFocusedCells(serverData) {
+  const activeEl = document.activeElement;
+  const activeIndex = activeEl ? parseInt(activeEl.dataset.index) : null;
+  const activeField = activeEl ? activeEl.dataset.field : null;
+  
+  const isDeptHeadFocused = activeEl && activeEl.id === 'dept-head-name';
+  const isVicePrincipalFocused = activeEl && activeEl.id === 'vice-principal-name';
+  
+  // 1. Update Grid Cells
+  serverData.classes.forEach((cls, idx) => {
+    // Dept & Class name
+    if (!(activeIndex === idx && activeField === 'deptClass')) {
+      const el = document.querySelector(`input[data-field="deptClass"][data-index="${idx}"]`);
+      if (el) el.value = cls.deptClass || '';
+    }
+    // Teacher Name
+    if (!(activeIndex === idx && activeField === 'teacherName')) {
+      const el = document.querySelector(`input[data-field="teacherName"][data-index="${idx}"]`);
+      if (el) el.value = cls.teacherName || '';
+    }
+    // Quantity
+    if (!(activeIndex === idx && activeField === 'quantity')) {
+      const el = document.querySelector(`input[data-field="quantity"][data-index="${idx}"]`);
+      if (el) el.value = cls.quantity || 0;
+    }
+    // Cabinet status drop-down
+    if (!(activeIndex === idx && activeField === 'chargingCabinet')) {
+      const el = document.querySelector(`select[data-field="chargingCabinet"][data-index="${idx}"]`);
+      if (el) {
+        el.value = cls.chargingCabinet || 'normal';
+        el.style.color = getCabinetColor(cls.chargingCabinet);
+      }
+    }
+    
+    // Always render signatures as they do not take text input focus directly
+    const sigDisplay = document.querySelectorAll('.row-sig-display')[idx];
+    if (sigDisplay) {
+      sigDisplay.innerHTML = getRowSignatureCellInnerHtml(cls, idx);
+    }
+  });
+  
+  // 2. Update Dept Head
+  if (!isDeptHeadFocused) {
+    document.getElementById('dept-head-name').value = serverData.deptHeadName || '';
+  }
+  renderDeptHeadSignatureDisplay(serverData);
+  
+  // 3. Update Vice Principal
+  if (!isVicePrincipalFocused) {
+    document.getElementById('vice-principal-name').value = serverData.vicePrincipalName || '';
+    document.getElementById('vice-principal-sig-style').value = serverData.vicePrincipalSigStyle || '1';
+  }
+  renderVicePrincipalSignatureDisplay(serverData);
+}
+
+function syncDataToFirebase() {
+  if (isFirebaseConnected && firebaseDb && firebaseRef) {
+    const currentGradeData = db[currentDate][currentGrade];
+    firebaseRef.set(currentGradeData).catch(err => {
+      console.error("Firebase 서버 업로드 실패", err);
+    });
+  }
+}
+
+// 5. UI Rendering Functions
 function renderGradeTabs() {
   const tabsContainer = document.getElementById('grade-tabs');
   tabsContainer.innerHTML = `
@@ -432,7 +669,7 @@ function clearRowSignature(index) {
   showToast(`${classRow.deptClass}의 담임 서명이 삭제되었습니다.`, 'info');
 }
 
-// 5. Event Listeners initialization
+// 6. Event Listeners initialization
 function initEventListeners() {
   // Date Selector Change
   document.getElementById('sheet-date-input').addEventListener('change', (e) => {
@@ -441,8 +678,14 @@ function initEventListeners() {
       currentDate = newDate;
       ensureDateDataExists(currentDate);
       updatePrintDateDisplay();
-      renderCurrentSheet();
-      renderStats();
+      
+      // Re-trigger Firebase sync location if connected
+      if (isFirebaseConnected) {
+        startFirebaseSyncListener();
+      } else {
+        renderCurrentSheet();
+        renderStats();
+      }
       showToast(`${currentDate} 대장을 불러왔습니다.`, 'info');
     }
   });
@@ -453,7 +696,13 @@ function initEventListeners() {
     if (btn) {
       currentGrade = parseInt(btn.dataset.grade);
       renderGradeTabs();
-      renderCurrentSheet();
+      
+      // Re-trigger Firebase sync location if connected
+      if (isFirebaseConnected) {
+        startFirebaseSyncListener();
+      } else {
+        renderCurrentSheet();
+      }
     }
   });
 
@@ -476,7 +725,6 @@ function initEventListeners() {
     
     // Partial DOM Update for teacherName to avoid focus loss
     if (field === 'teacherName') {
-      // 텍스트 자동 서명 주입 제거. 단, 이름이 지워지면 서명 이미지도 지움
       if (!val) {
         classRow.signature = '';
         classRow.signType = 'text';
@@ -511,7 +759,6 @@ function initEventListeners() {
 
   // Handle buttons and signature display click inside table rows (Strict Delegation)
   tableBody.addEventListener('click', (e) => {
-    // 1. Reset button check
     const resetBtn = e.target.closest('.row-sig-reset');
     if (resetBtn) {
       e.preventDefault();
@@ -521,7 +768,6 @@ function initEventListeners() {
       return;
     }
     
-    // 2. Draw signature check (Draw button or signature display click)
     const drawBtn = e.target.closest('.btn-sig-draw');
     const sigDisplay = e.target.closest('.row-sig-display');
     
@@ -584,6 +830,52 @@ function initEventListeners() {
     }
   });
 
+  // Open Firebase Server settings Modal
+  document.getElementById('btn-open-server-settings').addEventListener('click', () => {
+    const modal = document.getElementById('server-modal');
+    modal.classList.add('active');
+    
+    // Fill in textarea if config exists
+    const config = localStorage.getItem(FIREBASE_CONFIG_KEY);
+    if (config) {
+      document.getElementById('firebase-config-textarea').value = JSON.stringify(JSON.parse(config), null, 2);
+    }
+  });
+
+  document.getElementById('server-modal-close-btn').addEventListener('click', () => {
+    document.getElementById('server-modal').classList.remove('active');
+  });
+  document.getElementById('btn-cancel-server').addEventListener('click', () => {
+    document.getElementById('server-modal').classList.remove('active');
+  });
+
+  // Save Config & Connect
+  document.getElementById('btn-connect-server').addEventListener('click', () => {
+    const text = document.getElementById('firebase-config-textarea').value.trim();
+    if (!text) {
+      alert("Firebase 설정을 먼저 기입해 주세요.");
+      return;
+    }
+    
+    const config = parseFirebaseConfig(text);
+    if (!config) {
+      alert("올바른 Firebase Config 정보가 아닙니다. 형식을 확인해 주세요.");
+      return;
+    }
+    
+    connectToFirebase(config);
+    document.getElementById('server-modal').classList.remove('active');
+    showToast("Firebase 실시간 연동을 시작합니다.", "success");
+  });
+
+  // Disconnect
+  document.getElementById('btn-disconnect-server').addEventListener('click', () => {
+    if (confirm("실시간 서버 연결을 해제하시겠습니까? 데이터는 로컬 스토리지에만 저장됩니다.")) {
+      disconnectFirebase();
+      document.getElementById('server-modal').classList.remove('active');
+    }
+  });
+
   // Theme Toggle
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
@@ -635,7 +927,7 @@ function initEventListeners() {
   document.getElementById('btn-load-url').addEventListener('click', loadGoogleSheetCSV);
 }
 
-// 6. Signature Canvas Controllers
+// 7. Signature Canvas Controllers
 function initCanvas() {
   canvas = document.getElementById('signature-canvas');
   ctx = canvas.getContext('2d');
@@ -739,7 +1031,6 @@ function resizeCanvas() {
   canvas.width = container.clientWidth || 460;
   canvas.height = container.clientHeight || 200;
   
-  // Re-apply drawing context options since resizing clears canvas context styles
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -807,7 +1098,7 @@ function saveCanvasSignature() {
   showToast('서명이 안전하게 삽입되었습니다.', 'success');
 }
 
-// 7. Data Import & Export logic
+// 8. Data Import & Export logic
 function parseCSV(text) {
   const lines = [];
   let row = [""];
@@ -986,7 +1277,7 @@ function importClipboardData() {
 function exportToCSV() {
   const gradeData = db[currentDate][currentGrade];
   
-  let csvContent = "\ufeff"; // BOM
+  let csvContent = "\ufeff"; 
   csvContent += `검수 일자,${currentDate}\n`;
   csvContent += `학년,반(학과명 포함),담임교사,크롬북 수량,충전함 상태,담임 서명 여부\n`;
   
@@ -1022,7 +1313,7 @@ function exportToCSV() {
   showToast('CSV 내보내기가 완료되었습니다.', 'success');
 }
 
-// 8. Visual theme control
+// 9. Visual theme control
 function toggleTheme() {
   const html = document.documentElement;
   const currentTheme = html.getAttribute('data-theme');
@@ -1040,7 +1331,7 @@ function toggleTheme() {
   showToast(`${newTheme === 'dark' ? '다크' : '라이트'} 모드로 전환되었습니다.`, 'info');
 }
 
-// 9. Utility Functions
+// 10. Utility Functions
 function showToast(message, type = 'success') {
   const toast = document.getElementById('toast');
   const icon = document.getElementById('toast-icon');
