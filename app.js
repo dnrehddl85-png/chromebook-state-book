@@ -2,7 +2,7 @@
 
 // 1. Initial configuration and core constants
 const GRADES = [1, 2];
-const DB_KEY = 'chromebook_summary_ledger_v1';
+const DB_KEY = 'chromebook_summary_ledger_v2';
 
 // Departments configuration for initial setup
 const DEPT_1 = ['전동제어과', 'DSW과', '로보틱스과', '소재에너지과'];
@@ -19,7 +19,7 @@ let ctx = null;
 let isDrawing = false;
 let lastX = 0;
 let lastY = 0;
-let drawTargetRole = null; // 'homeroom' or 'deptHead'
+let drawTargetRole = null; // 'homeroom', 'deptHead', or 'vicePrincipal'
 let drawTargetRowIndex = null; // if role is 'homeroom', which row index
 let strokeColor = '#1e3a8a'; // Deep blue ink default
 
@@ -100,7 +100,6 @@ function ensureDateDataExists(dateStr) {
   
   GRADES.forEach(grade => {
     if (prevDate && db[prevDate] && db[prevDate][grade]) {
-      // Clone previous day data (names, quantities, statuses) but clear signatures
       const prevGradeData = db[prevDate][grade];
       db[dateStr][grade] = {
         classes: prevGradeData.classes.map(cls => ({
@@ -116,7 +115,11 @@ function ensureDateDataExists(dateStr) {
         deptHeadName: prevGradeData.deptHeadName || '',
         deptHeadSign: '',
         deptHeadSigStyle: prevGradeData.deptHeadSigStyle || '1',
-        deptHeadSignType: 'text'
+        deptHeadSignType: 'text',
+        vicePrincipalName: prevGradeData.vicePrincipalName || '',
+        vicePrincipalSign: '',
+        vicePrincipalSigStyle: prevGradeData.vicePrincipalSigStyle || '1',
+        vicePrincipalSignType: 'text'
       };
     } else {
       // Generate default data
@@ -125,7 +128,11 @@ function ensureDateDataExists(dateStr) {
         deptHeadName: '',
         deptHeadSign: '',
         deptHeadSigStyle: '1',
-        deptHeadSignType: 'text'
+        deptHeadSignType: 'text',
+        vicePrincipalName: '',
+        vicePrincipalSign: '',
+        vicePrincipalSigStyle: '1',
+        vicePrincipalSignType: 'text'
       };
     }
   });
@@ -137,7 +144,6 @@ function generateInitialClasses(grade) {
   const classesList = [];
   
   if (grade === 1) {
-    // 1st Grade: 4 departments, 12 classes (each dept has 3 classes: 1, 2, 3 ban)
     DEPT_1.forEach(dept => {
       for (let ban = 1; ban <= 3; ban++) {
         classesList.push({
@@ -145,7 +151,7 @@ function generateInitialClasses(grade) {
           deptClass: `${dept} ${ban}반`,
           teacherName: '',
           quantity: 18,
-          chargingCabinet: 'normal', // normal, warning, danger
+          chargingCabinet: 'normal',
           signature: '',
           sigStyle: '1',
           signType: 'text'
@@ -153,8 +159,6 @@ function generateInitialClasses(grade) {
       }
     });
   } else if (grade === 2) {
-    // 2nd Grade: 6 departments, 13 classes. 
-    // We map depts: 5 depts have 2 classes, 1 dept has 3 classes = 13 classes total
     DEPT_2.forEach((dept, idx) => {
       const bansCount = (idx === DEPT_2.length - 1) ? 3 : 2;
       for (let ban = 1; ban <= bansCount; ban++) {
@@ -203,7 +207,7 @@ function renderStats() {
           if (cls.signature && cls.teacherName) {
             signedCount++;
           }
-          if (cls.chargingCabinet === 'warning' || cls.chargingCabinet === 'danger') {
+          if (cls.chargingCabinet === 'cable_error' || cls.chargingCabinet === 'port_error') {
             cabinetErrors++;
           }
         });
@@ -219,37 +223,27 @@ function renderStats() {
 function renderCurrentSheet() {
   const gradeData = db[currentDate][currentGrade];
   
-  // Set titles
   document.getElementById('current-sheet-title').innerText = `${currentGrade}학년 크롬북 관리 대장`;
   document.getElementById('current-sheet-subtitle').innerText = `영남공업고등학교 | 학급 수: ${gradeData.classes.length}개 반`;
   
-  // Render Summary Table Rows
   const tbody = document.getElementById('class-table-body');
   tbody.innerHTML = '';
   
   gradeData.classes.forEach((cls, index) => {
     const tr = document.createElement('tr');
     
-    // Dropdown to select Grade in the row
     const gradeSelectHtml = `
-      <select class="grid-input" data-field="grade" data-index="${index}" style="text-align: center; font-weight:600;">
-        <option value="1" ${cls.grade === 1 ? 'selected' : ''}>1학년</option>
-        <option value="2" ${cls.grade === 2 ? 'selected' : ''}>2학년</option>
-      </select>
+      <span style="font-weight: 600; color: var(--text-secondary);">${cls.grade}학년</span>
     `;
     
-    // Dropdown to select Charging cabinet status
     const cabinetSelectHtml = `
       <select class="grid-input" data-field="chargingCabinet" data-index="${index}" style="text-align: center; color: ${getCabinetColor(cls.chargingCabinet)}; font-weight: 500;">
-        <option value="normal" ${cls.chargingCabinet === 'normal' ? 'selected' : ''} style="color: var(--success-color);">이상 없음</option>
-        <option value="warning" ${cls.chargingCabinet === 'warning' ? 'selected' : ''} style="color: #f59e0b;">점검 필요</option>
-        <option value="danger" ${cls.chargingCabinet === 'danger' ? 'selected' : ''} style="color: var(--danger-color);">이상 있음</option>
+        <option value="normal" ${cls.chargingCabinet === 'normal' ? 'selected' : ''} style="color: var(--success-color);">이상없음</option>
+        <option value="cable_error" ${cls.chargingCabinet === 'cable_error' ? 'selected' : ''} style="color: #f59e0b;">케이블 불량</option>
+        <option value="port_error" ${cls.chargingCabinet === 'port_error' ? 'selected' : ''} style="color: var(--danger-color);">충전 단자 입구 불량</option>
       </select>
     `;
 
-    // Row signature HTML cell
-    const sigCellHtml = getRowSignatureCellHtml(cls, index);
-    
     tr.innerHTML = `
       <td style="text-align: center; background-color: var(--bg-tertiary);">${gradeSelectHtml}</td>
       <td>
@@ -265,26 +259,49 @@ function renderCurrentSheet() {
         ${cabinetSelectHtml}
       </td>
       <td class="sig-cell">
-        ${sigCellHtml}
+        <div class="row-sig-container">
+          <div class="row-sig-display" data-index="${index}" title="클릭하여 직접 서명하기">
+            ${getRowSignatureCellInnerHtml(cls, index)}
+          </div>
+          <div class="row-sig-controls no-print">
+            <select class="table-style-select" data-field="sigStyle" data-index="${index}">
+              <option value="1" ${cls.sigStyle === '1' ? 'selected' : ''}>펜</option>
+              <option value="2" ${cls.sigStyle === '2' ? 'selected' : ''}>붓</option>
+              <option value="3" ${cls.sigStyle === '3' ? 'selected' : ''}>독도</option>
+              <option value="seal" ${cls.sigStyle === 'seal' ? 'selected' : ''}>도장</option>
+            </select>
+            <button class="btn-sig-draw" data-index="${index}" title="직접 그리기 서명패드 열기">
+              <i data-lucide="edit-3" style="width:12px; height:12px;"></i>
+            </button>
+          </div>
+        </div>
       </td>
     `;
     
     tbody.appendChild(tr);
   });
   
-  // Render Department Head sign-off at bottom
+  // Render Bottom final sign-offs
+  // Department Head
   document.getElementById('dept-head-name').value = gradeData.deptHeadName || '';
   document.getElementById('dept-head-sig-style').value = gradeData.deptHeadSigStyle || '1';
   renderDeptHeadSignatureDisplay(gradeData);
+  
+  // Vice Principal
+  document.getElementById('vice-principal-name').value = gradeData.vicePrincipalName || '';
+  document.getElementById('vice-principal-sig-style').value = gradeData.vicePrincipalSigStyle || '1';
+  renderVicePrincipalSignatureDisplay(gradeData);
+  
+  initLucide();
 }
 
 function getCabinetColor(status) {
-  if (status === 'warning') return '#d97706';
-  if (status === 'danger') return 'var(--danger-color)';
+  if (status === 'cable_error') return '#d97706';
+  if (status === 'port_error') return 'var(--danger-color)';
   return 'var(--success-color)';
 }
 
-function getRowSignatureCellHtml(cls, index) {
+function getRowSignatureCellInnerHtml(cls, index) {
   const name = cls.teacherName;
   const sign = cls.signature;
   const style = cls.sigStyle;
@@ -312,25 +329,9 @@ function getRowSignatureCellHtml(cls, index) {
     }
   }
   
-  return `
-    <div class="row-sig-container">
-      <div class="row-sig-display" data-index="${index}" title="클릭하여 직접 서명하기">
-        ${sigContentHtml}
-        ${(name || sign) ? `<button class="signature-reset-btn row-sig-reset" data-index="${index}" title="서명 지우기">&times;</button>` : ''}
-      </div>
-      <div class="row-sig-controls no-print">
-        <select class="table-style-select" data-field="sigStyle" data-index="${index}">
-          <option value="1" ${style === '1' ? 'selected' : ''}>펜</option>
-          <option value="2" ${style === '2' ? 'selected' : ''}>붓</option>
-          <option value="3" ${style === '3' ? 'selected' : ''}>독도</option>
-          <option value="seal" ${style === 'seal' ? 'selected' : ''}>도장</option>
-        </select>
-        <button class="btn-sig-draw" data-index="${index}" title="직접 그리기 서명패드 열기">
-          <i data-lucide="edit-3" style="width:12px; height:12px;"></i>
-        </button>
-      </div>
-    </div>
-  `;
+  const resetBtnHtml = (name || sign) ? `<button class="signature-reset-btn row-sig-reset" data-index="${index}" title="서명 지우기">&times;</button>` : '';
+  
+  return `${sigContentHtml}${resetBtnHtml}`;
 }
 
 function renderDeptHeadSignatureDisplay(gradeData) {
@@ -347,7 +348,6 @@ function renderDeptHeadSignatureDisplay(gradeData) {
         <span>이름 입력 또는 서명란 클릭</span>
       </div>
     `;
-    initLucide();
     return;
   }
   
@@ -385,6 +385,57 @@ function renderDeptHeadSignatureDisplay(gradeData) {
   displayArea.appendChild(resetBtn);
 }
 
+function renderVicePrincipalSignatureDisplay(gradeData) {
+  const displayArea = document.getElementById('vice-principal-signature-display');
+  const name = gradeData.vicePrincipalName;
+  const sign = gradeData.vicePrincipalSign;
+  const style = gradeData.vicePrincipalSigStyle;
+  const type = gradeData.vicePrincipalSignType;
+  
+  if (!name && !sign) {
+    displayArea.innerHTML = `
+      <div class="signature-placeholder" id="vice-principal-placeholder">
+        <i data-lucide="signature" style="width: 24px; height: 24px; color: var(--text-muted);"></i>
+        <span>이름 입력 또는 서명란 클릭</span>
+      </div>
+    `;
+    return;
+  }
+  
+  displayArea.innerHTML = '';
+  
+  if (type === 'draw' && sign) {
+    const img = document.createElement('img');
+    img.src = sign;
+    img.className = 'signature-image';
+    displayArea.appendChild(img);
+  } else if (name) {
+    const container = document.createElement('div');
+    if (style === 'seal') {
+      container.className = 'sig-font-seal';
+      let sealText = name;
+      if (name.length === 3) sealText = `${name[0]}<br>${name[1]}${name[2]}`;
+      else if (name.length === 2) sealText = `${name[0]}<br>${name[1]}인`;
+      else if (name.length > 3) sealText = name.substring(0, 4);
+      container.innerHTML = sealText;
+    } else {
+      container.className = `sig-text sig-font-${style}`;
+      container.innerText = name;
+    }
+    displayArea.appendChild(container);
+  }
+  
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'signature-reset-btn';
+  resetBtn.innerHTML = '&times;';
+  resetBtn.title = '서명 지우기';
+  resetBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearVicePrincipalSignature();
+  });
+  displayArea.appendChild(resetBtn);
+}
+
 function clearDeptHeadSignature() {
   const gradeData = db[currentDate][currentGrade];
   gradeData.deptHeadName = '';
@@ -394,6 +445,17 @@ function clearDeptHeadSignature() {
   saveData();
   renderCurrentSheet();
   showToast('부장 확인 서명이 지워졌습니다.', 'info');
+}
+
+function clearVicePrincipalSignature() {
+  const gradeData = db[currentDate][currentGrade];
+  gradeData.vicePrincipalName = '';
+  gradeData.vicePrincipalSign = '';
+  gradeData.vicePrincipalSignType = 'text';
+  document.getElementById('vice-principal-name').value = '';
+  saveData();
+  renderCurrentSheet();
+  showToast('교감 확인 서명이 지워졌습니다.', 'info');
 }
 
 function clearRowSignature(index) {
@@ -447,20 +509,17 @@ function initEventListeners() {
     
     classRow[field] = val;
     
-    // Auto-update signature display when teacher name is typed
+    // Partial DOM Update for teacherName to avoid focus loss
     if (field === 'teacherName') {
       if (classRow.signType !== 'draw') {
         classRow.signature = val ? val : '';
       }
-      // Re-render only that cell's content to avoid losing focus if possible, 
-      // but for simplicity we re-render sheet
       saveData();
-      renderCurrentSheet();
-      // Keep focus on the active input element
-      const inputs = document.querySelectorAll(`input[data-field="teacherName"]`);
-      if (inputs[index]) {
-        inputs[index].focus();
-        inputs[index].setSelectionRange(val.length, val.length);
+      
+      // Update signature cell DOM directly without full table re-render
+      const sigDisplay = document.querySelectorAll('.row-sig-display')[index];
+      if (sigDisplay) {
+        sigDisplay.innerHTML = getRowSignatureCellInnerHtml(classRow, index);
       }
       return;
     }
@@ -478,7 +537,7 @@ function initEventListeners() {
     
     if (field === 'sigStyle') {
       classRow.sigStyle = el.value;
-      classRow.signType = 'text'; // override canvas drawing on change
+      classRow.signType = 'text'; // override canvas
       saveData();
       renderCurrentSheet();
       return;
@@ -494,7 +553,6 @@ function initEventListeners() {
 
   // Handle buttons and signature display click inside table rows
   tableBody.addEventListener('click', (e) => {
-    // 1. Reset signature button
     const resetBtn = e.target.closest('.row-sig-reset');
     if (resetBtn) {
       e.stopPropagation();
@@ -503,7 +561,6 @@ function initEventListeners() {
       return;
     }
     
-    // 2. Draw signature button click
     const drawBtn = e.target.closest('.btn-sig-draw');
     if (drawBtn) {
       const index = parseInt(drawBtn.dataset.index);
@@ -511,7 +568,6 @@ function initEventListeners() {
       return;
     }
     
-    // 3. Row signature area click (Alternative to draw button)
     const sigDisplay = e.target.closest('.row-sig-display');
     if (sigDisplay && !e.target.closest('.row-sig-reset')) {
       const index = parseInt(sigDisplay.dataset.index);
@@ -549,6 +605,36 @@ function initEventListeners() {
     }
   });
 
+  // Vice Principal Name change
+  document.getElementById('vice-principal-name').addEventListener('input', (e) => {
+    const val = e.target.value;
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.vicePrincipalName = val;
+    if (gradeData.vicePrincipalSignType !== 'draw') {
+      gradeData.vicePrincipalSign = val ? val : '';
+    }
+    saveData();
+    renderVicePrincipalSignatureDisplay(gradeData);
+  });
+
+  // Vice Principal Style Dropdown change
+  document.getElementById('vice-principal-sig-style').addEventListener('change', (e) => {
+    const val = e.target.value;
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.vicePrincipalSigStyle = val;
+    gradeData.vicePrincipalSignType = 'text';
+    saveData();
+    renderCurrentSheet();
+  });
+
+  // Vice Principal Sign Canvas open
+  document.getElementById('vice-principal-draw-btn').addEventListener('click', () => openVicePrincipalSignatureModal());
+  document.getElementById('vice-principal-signature-display').addEventListener('click', (e) => {
+    if (!e.target.closest('.signature-reset-btn')) {
+      openVicePrincipalSignatureModal();
+    }
+  });
+
   // Theme Toggle
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
 
@@ -568,7 +654,11 @@ function initEventListeners() {
         deptHeadName: '',
         deptHeadSign: '',
         deptHeadSigStyle: '1',
-        deptHeadSignType: 'text'
+        deptHeadSignType: 'text',
+        vicePrincipalName: '',
+        vicePrincipalSign: '',
+        vicePrincipalSigStyle: '1',
+        vicePrincipalSignType: 'text'
       };
       saveData();
       renderCurrentSheet();
@@ -681,6 +771,24 @@ function openDeptHeadSignatureModal() {
   setTimeout(resizeCanvas, 100);
 }
 
+function openVicePrincipalSignatureModal() {
+  const gradeData = db[currentDate][currentGrade];
+  const name = (gradeData.vicePrincipalName || '').trim();
+  
+  if (!name) {
+    alert('서명하기 전에 교감 선생님 성명을 입력해 주세요.');
+    document.getElementById('vice-principal-name').focus();
+    return;
+  }
+  
+  drawTargetRole = 'vicePrincipal';
+  drawTargetRowIndex = null;
+  
+  document.getElementById('modal-title').innerText = `교감 선생님 [${name}] 직접 서명`;
+  document.getElementById('signature-modal').classList.add('active');
+  setTimeout(resizeCanvas, 100);
+}
+
 function resizeCanvas() {
   const container = canvas.parentElement;
   canvas.width = container.clientWidth;
@@ -716,6 +824,7 @@ function draw(e) {
   lastY = currentY;
 }
 
+// Touchend maps to stop drawing
 function stopDrawing() {
   isDrawing = false;
 }
@@ -736,6 +845,10 @@ function saveCanvasSignature() {
     const gradeData = db[currentDate][currentGrade];
     gradeData.deptHeadSign = dataURL;
     gradeData.deptHeadSignType = 'draw';
+  } else if (drawTargetRole === 'vicePrincipal') {
+    const gradeData = db[currentDate][currentGrade];
+    gradeData.vicePrincipalSign = dataURL;
+    gradeData.vicePrincipalSignType = 'draw';
   }
   
   saveData();
@@ -830,7 +943,6 @@ function importCSVToCurrentClasses(rows) {
   const newClasses = [];
   
   rawDataRows.forEach((row) => {
-    // Determine row grade
     let parsedGrade = currentGrade;
     if (row[gradeCol]) {
       const gStr = row[gradeCol].replace(/[^0-9]/g, '');
@@ -839,12 +951,11 @@ function importCSVToCurrentClasses(rows) {
       }
     }
     
-    // Only load classes belonging to currentGrade (unless everything is in one table)
     if (parsedGrade === currentGrade) {
       let cabStatus = 'normal';
       const rawCabVal = row[cabinetCol] ? row[cabinetCol].trim() : '';
-      if (rawCabVal.includes('점검') || rawCabVal.includes('필요') || rawCabVal.includes('보수')) cabStatus = 'warning';
-      else if (rawCabVal.includes('이상') && (rawCabVal.includes('있음') || rawCabVal.includes('불량') || rawCabVal.includes('고장'))) cabStatus = 'danger';
+      if (rawCabVal.includes('케이블') || rawCabVal.includes('선')) cabStatus = 'cable_error';
+      else if (rawCabVal.includes('단자') || rawCabVal.includes('입구') || rawCabVal.includes('포트') || rawCabVal.includes('불량')) cabStatus = 'port_error';
       
       newClasses.push({
         grade: currentGrade,
@@ -931,8 +1042,8 @@ function exportToCSV() {
   
   gradeData.classes.forEach(cls => {
     let cabinetText = '이상 없음';
-    if (cls.chargingCabinet === 'warning') cabinetText = '점검 필요';
-    if (cls.chargingCabinet === 'danger') cabinetText = '이상 있음';
+    if (cls.chargingCabinet === 'cable_error') cabinetText = '케이블 불량';
+    if (cls.chargingCabinet === 'port_error') cabinetText = '충전 단자 입구 불량';
     
     const row = [
       `${cls.grade}학년`,
@@ -947,6 +1058,7 @@ function exportToCSV() {
   
   csvContent += `\n`;
   csvContent += `부서부장 최종 확인 결재,${gradeData.deptHeadName || ''},(${gradeData.deptHeadSign ? '결재완료' : '미결재'})\n`;
+  csvContent += `교감 선생님 최종 확인 결재,${gradeData.vicePrincipalName || ''},(${gradeData.vicePrincipalSign ? '결재완료' : '미결재'})\n`;
   
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

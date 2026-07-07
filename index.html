@@ -147,31 +147,56 @@
         </table>
       </div>
 
-      <!-- Bottom Department Head Final Sign-off -->
+      <!-- Bottom Department Head & Vice Principal Final Sign-off -->
       <div class="signatures-container">
-        <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end;">
-          <div class="signature-box" style="width: 350px;">
-            <div class="signature-label">
-              <i data-lucide="shield-check"></i>
-              <span>부서 부장 최종 확인 결재</span>
+        <!-- Department Head Sign-off -->
+        <div class="signature-box">
+          <div class="signature-label">
+            <i data-lucide="shield-check"></i>
+            <span>부서 부장 최종 확인 결재</span>
+          </div>
+          <div class="signature-input-row no-print">
+            <input type="text" id="dept-head-name" class="input-text" placeholder="부서 부장 성명">
+            <select id="dept-head-sig-style" class="style-select">
+              <option value="1">손글씨 1 (펜)</option>
+              <option value="2">손글씨 2 (붓)</option>
+              <option value="3">개성체 (독도)</option>
+              <option value="seal">확인 도장</option>
+            </select>
+            <button class="btn btn-primary" id="dept-draw-btn">
+              <i data-lucide="edit-3"></i>
+            </button>
+          </div>
+          <div class="signature-display-area" id="dept-signature-display" style="height: 80px;">
+            <div class="signature-placeholder" id="dept-placeholder">
+              <i data-lucide="signature" style="width: 24px; height: 24px;"></i>
+              <span>이름 입력 또는 서명란 클릭</span>
             </div>
-            <div class="signature-input-row no-print">
-              <input type="text" id="dept-head-name" class="input-text" placeholder="부서 부장 성명">
-              <select id="dept-head-sig-style" class="style-select">
-                <option value="1">손글씨 1 (펜)</option>
-                <option value="2">손글씨 2 (붓)</option>
-                <option value="3">개성체 (독도)</option>
-                <option value="seal">확인 도장</option>
-              </select>
-              <button class="btn btn-primary" id="dept-draw-btn">
-                <i data-lucide="edit-3"></i>
-              </button>
-            </div>
-            <div class="signature-display-area" id="dept-signature-display" style="height: 80px;">
-              <div class="signature-placeholder" id="dept-placeholder">
-                <i data-lucide="signature" style="width: 24px; height: 24px;"></i>
-                <span>이름 입력 또는 서명란 클릭</span>
-              </div>
+          </div>
+        </div>
+
+        <!-- Vice Principal Sign-off -->
+        <div class="signature-box">
+          <div class="signature-label">
+            <i data-lucide="user-check"></i>
+            <span>교감 선생님 최종 확인 결재</span>
+          </div>
+          <div class="signature-input-row no-print">
+            <input type="text" id="vice-principal-name" class="input-text" placeholder="교감 선생님 성명">
+            <select id="vice-principal-sig-style" class="style-select">
+              <option value="1">손글씨 1 (펜)</option>
+              <option value="2">손글씨 2 (붓)</option>
+              <option value="3">개성체 (독도)</option>
+              <option value="seal">확인 도장</option>
+            </select>
+            <button class="btn btn-primary" id="vice-principal-draw-btn">
+              <i data-lucide="edit-3"></i>
+            </button>
+          </div>
+          <div class="signature-display-area" id="vice-principal-signature-display" style="height: 80px;">
+            <div class="signature-placeholder" id="vice-principal-placeholder">
+              <i data-lucide="signature" style="width: 24px; height: 24px;"></i>
+              <span>이름 입력 또는 서명란 클릭</span>
             </div>
           </div>
         </div>
