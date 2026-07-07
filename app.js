@@ -2,10 +2,10 @@
 
 // 1. Initial configuration and core constants
 const GRADES = [1, 2];
-const DB_KEY = 'chromebook_summary_ledger_v3'; // 데이터 구조 개편에 따른 캐시 충돌 방지용 키 업데이트
+const DB_KEY = 'chromebook_summary_ledger_v5'; // 데이터 구조 및 서명 메커니즘 개편에 따른 캐시 충돌 방지용 키 업데이트
 
 // Departments configuration for initial setup
-const DEPT_1 = ['소재', '전동', '로봇', '데이터소프트'];
+const DEPT_1 = ['소재', '전동', '로보', '데이터소프트'];
 const DEPT_2 = ['화공', '스마트패션', '전기정보', '스마트융합', '전자과', '스마트소프트'];
 
 // Global App State
@@ -261,14 +261,9 @@ function renderCurrentSheet() {
             ${getRowSignatureCellInnerHtml(cls, index)}
           </div>
           <div class="row-sig-controls no-print">
-            <select class="table-style-select" data-field="sigStyle" data-index="${index}">
-              <option value="1" ${cls.sigStyle === '1' ? 'selected' : ''}>펜</option>
-              <option value="2" ${cls.sigStyle === '2' ? 'selected' : ''}>붓</option>
-              <option value="3" ${cls.sigStyle === '3' ? 'selected' : ''}>독도</option>
-              <option value="seal" ${cls.sigStyle === 'seal' ? 'selected' : ''}>도장</option>
-            </select>
             <button class="btn-sig-draw" data-index="${index}" title="직접 그리기 서명패드 열기">
               <i data-lucide="edit-3" style="width:12px; height:12px;"></i>
+              <span style="font-size: 0.75rem; margin-left: 2px;">직접 서명</span>
             </button>
           </div>
         </div>
@@ -301,32 +296,21 @@ function getCabinetColor(status) {
 function getRowSignatureCellInnerHtml(cls, index) {
   const name = cls.teacherName;
   const sign = cls.signature;
-  const style = cls.sigStyle;
   const type = cls.signType;
   
   let sigContentHtml = '';
   
-  if (!name && !sign) {
+  if (type === 'draw' && sign) {
+    sigContentHtml = `<img src="${sign}" class="signature-image">`;
+  } else {
     sigContentHtml = `
       <div class="signature-placeholder" style="font-size:0.75rem;">
-        <span>이름을 기입해 주세요</span>
+        <span>${name ? '클릭하여 직접 서명' : '이름을 기입해 주세요'}</span>
       </div>
     `;
-  } else if (type === 'draw' && sign) {
-    sigContentHtml = `<img src="${sign}" class="signature-image">`;
-  } else if (name) {
-    if (style === 'seal') {
-      let sealText = name;
-      if (name.length === 3) sealText = `${name[0]}<br>${name[1]}${name[2]}`;
-      else if (name.length === 2) sealText = `${name[0]}<br>${name[1]}인`;
-      else if (name.length > 3) sealText = name.substring(0, 4);
-      sigContentHtml = `<div class="sig-font-seal">${sealText}</div>`;
-    } else {
-      sigContentHtml = `<div class="sig-text sig-font-${style}">${name}</div>`;
-    }
   }
   
-  const resetBtnHtml = (name || sign) ? `<button class="signature-reset-btn row-sig-reset" data-index="${index}" title="서명 지우기">&times;</button>` : '';
+  const resetBtnHtml = sign ? `<button class="signature-reset-btn row-sig-reset" data-index="${index}" title="서명 지우기">&times;</button>` : '';
   
   return `${sigContentHtml}${resetBtnHtml}`;
 }
@@ -335,14 +319,13 @@ function renderDeptHeadSignatureDisplay(gradeData) {
   const displayArea = document.getElementById('dept-signature-display');
   const name = gradeData.deptHeadName;
   const sign = gradeData.deptHeadSign;
-  const style = gradeData.deptHeadSigStyle;
   const type = gradeData.deptHeadSignType;
   
-  if (!name && !sign) {
+  if (!sign) {
     displayArea.innerHTML = `
       <div class="signature-placeholder" id="dept-placeholder">
         <i data-lucide="signature" style="width: 24px; height: 24px; color: var(--text-muted);"></i>
-        <span>이름 입력 또는 서명란 클릭</span>
+        <span>${name ? '클릭하여 직접 서명' : '이름 입력 또는 서명란 클릭'}</span>
       </div>
     `;
     return;
@@ -355,20 +338,6 @@ function renderDeptHeadSignatureDisplay(gradeData) {
     img.src = sign;
     img.className = 'signature-image';
     displayArea.appendChild(img);
-  } else if (name) {
-    const container = document.createElement('div');
-    if (style === 'seal') {
-      container.className = 'sig-font-seal';
-      let sealText = name;
-      if (name.length === 3) sealText = `${name[0]}<br>${name[1]}${name[2]}`;
-      else if (name.length === 2) sealText = `${name[0]}<br>${name[1]}인`;
-      else if (name.length > 3) sealText = name.substring(0, 4);
-      container.innerHTML = sealText;
-    } else {
-      container.className = `sig-text sig-font-${style}`;
-      container.innerText = name;
-    }
-    displayArea.appendChild(container);
   }
   
   const resetBtn = document.createElement('button');
@@ -508,12 +477,13 @@ function initEventListeners() {
     
     // Partial DOM Update for teacherName to avoid focus loss
     if (field === 'teacherName') {
-      if (classRow.signType !== 'draw') {
-        classRow.signature = val ? val : '';
+      // 텍스트 자동 서명 주입 제거. 단, 이름이 지워지면 서명 이미지도 지움
+      if (!val) {
+        classRow.signature = '';
+        classRow.signType = 'text';
       }
       saveData();
       
-      // Update signature cell DOM directly without full table re-render
       const sigDisplay = document.querySelectorAll('.row-sig-display')[index];
       if (sigDisplay) {
         sigDisplay.innerHTML = getRowSignatureCellInnerHtml(classRow, index);
@@ -577,8 +547,10 @@ function initEventListeners() {
     const val = e.target.value;
     const gradeData = db[currentDate][currentGrade];
     gradeData.deptHeadName = val;
-    if (gradeData.deptHeadSignType !== 'draw') {
-      gradeData.deptHeadSign = val ? val : '';
+    // 부장 이름이 지워지면 서명도 함께 삭제
+    if (!val) {
+      gradeData.deptHeadSign = '';
+      gradeData.deptHeadSignType = 'text';
     }
     saveData();
     renderDeptHeadSignatureDisplay(gradeData);
